@@ -30,6 +30,13 @@
 
 **amsi-etw-ping-BOF:** Checks for AMSI and ETW presence in the current process by detecting loaded DLLs and ETW-related exports. Applied to large number of beacons, we will be able to pick targets that have less security activity.
 
+**wsc_pulse:** Queries Windows Security Center health status including Anti-Virus, Firewall, Anti-Spyware, WSC Service, Auto-Update, Internet Settings, and User Account Control.
+
+**idl_gui:** Gets user idle time since last input and GUI resource usage (GDI/USER handles) in the current process for timing intelligence.
+
+**enumwindowhandles:** Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.
+
+**clipboardupdated:** Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.
   
 
 DISCLAIMER: The creators of this repository are not responsible for any harm or damage that may occur as a result of using the information or code provided in this repository.
