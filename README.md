@@ -24,7 +24,7 @@
 </div>
 
 
-**BOF Description:**
+**BOF Descriptions:**
 
 **appnumberBOF:** Counts the number of installed applications via the registry, de-duplicates, and prints. Applied to large number of beacons we can see differences in app number quantity and infer certain things about that device.
 
