@@ -32,7 +32,7 @@
 | **idle_gui**             | Gets user idle time since last input and GUI resource usage (GDI/USER handles) in the current process for timing intelligence.                                         |
 | **enumwindowhandles**    | Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.                                                      |
 | **clipboardupdated**     | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
-  
+| **bitlocker_status**     | Enumerates BitLocker encryption status, policy configurations, and recovery key backup locations by scanning registry keys.                                             |
 ---
 
 **DISCLAIMER:** The creators of this repository are not responsible for any harm or damage that may occur as a result of using the information or code provided in this repository.
