@@ -1,4 +1,4 @@
-# AMSI/ETW Ping BOF
+# AMSI/ETW Detect BOF
 
 ## Summary
 

@@ -1,4 +1,4 @@
-# Makefile for AMSI/ETW Ping BOF
+# Makefile for AMSI/ETW Detect BOF
 
 CC_X64  ?= x86_64-w64-mingw32-gcc
 CC_X86  ?= i686-w64-mingw32-gcc
@@ -12,7 +12,7 @@ CFLAGS_COMMON := -c -Os -std=c99 \
 
 CFLAGS_COMMON += -fno-leading-underscore -fno-ms-extensions
 
-TARGET := amsi_etw_ping
+TARGET := amsi_etw_detect
 SOURCE := $(TARGET).c
 HEADERS := beacon.h
 
@@ -45,7 +45,7 @@ clean:
 	rm -f *.o
 
 info:
-	@echo "AMSI/ETW Ping BOF Build System"
+	@echo "AMSI/ETW Detect BOF Build System"
 	@echo "Targets:"
 	@echo "  all     - Build both x64 and x86 BOF objects"
 	@echo "  debug   - Build x64 and show all symbols/relocations"

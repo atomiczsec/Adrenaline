@@ -1,4 +1,4 @@
-# Count Installed Applications BOF
+# Applications Enum BOF
 
 ## Summary
 

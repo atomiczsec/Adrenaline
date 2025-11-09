@@ -16,5 +16,4 @@ all: $(OBJS)
 	$(STRIP_x64) --strip-unneeded $@
 
 clean:
-	rm -f *.o *.x64.oan:
-	rm *.o
+	rm -f *.o *.x64.o

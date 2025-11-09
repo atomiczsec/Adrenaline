@@ -1,5 +1,5 @@
-SRC = wsc_pulse.c
-TARGET = wsc_pulse
+SRC = wsc_status.c
+TARGET = wsc_status
 
 # Toolchain (adjust if using different MinGW installation)
 CC_x64 := x86_64-w64-mingw32-gcc

@@ -1,4 +1,4 @@
-# Makefile for idle_gui BOF
+# Makefile for user_idle BOF
 # Builds x64 and x86 COFF objects for Cobalt Strike
 # Reports user idle time + GUI resource pressure (GDI/USER handles)
 
@@ -12,7 +12,7 @@ CFLAGS_COMMON := -c -Os \
   -fno-asynchronous-unwind-tables -fno-ident \
   -Wall -Wextra -Wno-unused-parameter
 
-TARGET := idle_gui
+TARGET := user_idle
 SOURCE := $(TARGET).c
 HEADERS := beacon.h
 
@@ -37,7 +37,7 @@ clean:
 	rm -f *.o
 
 info:
-	@echo "idle_gui BOF Build System"
+	@echo "user_idle BOF Build System"
 	@echo "Targets:"
 	@echo "  all     - Build both x64 and x86 BOF objects"
 	@echo "  debug   - Build x64 and show all symbols/relocations"
