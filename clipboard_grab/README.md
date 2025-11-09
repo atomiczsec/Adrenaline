@@ -1,4 +1,4 @@
-# Clipboard BOF
+# Clipboard Grab BOF
 
 ## Summary
 

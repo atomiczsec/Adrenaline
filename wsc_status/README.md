@@ -1,4 +1,4 @@
-# WSC Pulse BOF
+# WSC Status BOF
 
 ## Summary
 

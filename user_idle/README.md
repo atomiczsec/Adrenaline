@@ -1,4 +1,4 @@
-# Idle GUI BOF
+# User Idle BOF
 
 ## Summary
 

@@ -1,4 +1,4 @@
-# EnumWindowHandles BOF
+# Window Handles Enum BOF
 
 ## Summary
 
