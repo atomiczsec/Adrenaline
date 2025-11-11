@@ -2,26 +2,8 @@
 <img src="https://github.com/atomiczsec/Adrenaline/blob/main/Assets/ADRENALINE.jpg" width="100%">
 
 *This repository contains BOFs (Beacon Object Files) designed for various red team and offensive security engagements. The end goal is to have a toolkit of BOFs that we can run interchangeably when looking to orchestrate large scale recon or actions.*
-<div align='center'>
 
-### Quick Reference
-  
-<a href='https://twitter.com/atomiczsec'>
-  
-<img src='https://img.shields.io/twitter/follow/atomiczsec?style=social'>
-  
-</a>
-  
-<a href='https://github.com/atomiczsec/My-Payloads/'>
-  
-</a>
-  
-<a href='https://github.com/atomiczsec/'>
-  
-<img src='https://img.shields.io/github/followers/atomiczsec?style=social'>
-  
-</a>
-</div>
+<div align='center'>
 
 
 | **BOF**                  | **Use**                                                                                                                                                         |
@@ -36,6 +18,19 @@
 | **[wef_detect](wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
 | **[netjoin_query](netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup.                                             |
 ---
+
+## Contact Me
+  
+<a href='https://twitter.com/atomiczsec'>
+<img src='https://img.shields.io/twitter/follow/atomiczsec?style=social'>
+</a>
+  
+<a href='https://github.com/atomiczsec/'>
+<img src='https://img.shields.io/github/followers/atomiczsec?style=social'>
+</a>
+
+</div>
+
 
 **DISCLAIMER:** The creators of this repository are not responsible for any harm or damage that may occur as a result of using the information or code provided in this repository.
 By accessing and using this repository, you acknowledge and agree that you do so at your own risk. 
