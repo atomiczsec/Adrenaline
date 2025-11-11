@@ -34,6 +34,7 @@
 | **[clipboard_grab](clipboard_grab/)**       | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
 | **[bitlocker_status](bitlocker_status/)**     | Enumerates BitLocker encryption status, policy configurations, and recovery key backup locations by scanning registry keys.                                             |
 | **[wef_detect](wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
+| **[netjoin_query](netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup.                                             |
 ---
 
 **DISCLAIMER:** The creators of this repository are not responsible for any harm or damage that may occur as a result of using the information or code provided in this repository.
