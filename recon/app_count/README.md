@@ -1,4 +1,4 @@
-# Applications Enum BOF
+# Applications Count BOF
 
 ## Summary
 
