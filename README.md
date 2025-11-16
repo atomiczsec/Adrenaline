@@ -20,17 +20,14 @@
 | **[netjoin_query](recon/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup.                                             |
 ---
 
-## Contact Me
-  
-<a href='https://twitter.com/atomiczsec'>
-<img src='https://img.shields.io/twitter/follow/atomiczsec?style=social'>
-</a>
-  
-<a href='https://github.com/atomiczsec/'>
-<img src='https://img.shields.io/github/followers/atomiczsec?style=social'>
-</a>
-
-</div>
+<h3 align="center">Connect with me:</h3>
+<p align="center">
+  <a href="https://github.com/atomiczsec" target="_blank"><img src="https://raw.githubusercontent.com/rahuldkjain/github-profile-readme-generator/master/src/images/icons/Social/github.svg" height="30" width="40" /></a>
+  <a href="https://instagram.com/atomiczsec" target="_blank"><img src="https://raw.githubusercontent.com/rahuldkjain/github-profile-readme-generator/master/src/images/icons/Social/instagram.svg" height="30" width="40" /></a>
+  <a href="https://twitter.com/atomiczsec" target="_blank"><img src="https://raw.githubusercontent.com/rahuldkjain/github-profile-readme-generator/master/src/images/icons/Social/twitter.svg" height="30" width="40" /></a>
+  <a href="https://medium.com/@atomiczsec" target="_blank"><img src="https://raw.githubusercontent.com/rahuldkjain/github-profile-readme-generator/master/src/images/icons/Social/medium.svg" height="30" width="40" /></a>
+  <a href="https://youtube.com/@atomiczsec" target="_blank"><img src="https://raw.githubusercontent.com/rahuldkjain/github-profile-readme-generator/master/src/images/icons/Social/youtube.svg" height="30" width="40" /></a>
+</p>
 
 ---
 
