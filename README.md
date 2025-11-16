@@ -15,6 +15,7 @@
 | **[window_handles_enum](cred_access/window_handles_enum/)**  | Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.                                                      |
 | **[clipboard_grab](cred_access/clipboard_grab/)**       | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
 | **[bitlocker_status](env_assessment/bitlocker_status/)**     | Enumerates BitLocker encryption status, policy configurations, and recovery key backup locations by scanning registry keys.                                             |
+| **[applocker_policy](env_assessment/applocker_policy/)**     | Enumerates AppLocker policy configurations, rule collections, and enforcement modes by scanning the relevant registry keys.                                             |
 | **[wef_detect](env_assessment/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
 | **[netjoin_query](recon/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup.                                             |
 ---
