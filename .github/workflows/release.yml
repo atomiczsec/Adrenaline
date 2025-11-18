@@ -1,0 +1,149 @@
+name: Auto Release on .o File Changes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.o'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history to compare changes
+      
+      - name: Detect changed .o files
+        id: detect_changes
+        run: |
+          # Check if this is the first commit
+          if [ $(git rev-list --count HEAD) -eq 1 ]; then
+            # First commit - get all .o files
+            CHANGED_FILES=$(git ls-tree -r --name-only HEAD | grep '\.o$' || true)
+            DIFF_BASE=""
+          else
+            # Compare with previous commit
+            CHANGED_FILES=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD | grep '\.o$' || true)
+            DIFF_BASE="HEAD~1"
+          fi
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No .o files changed"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" > changed_files.txt
+          echo "diff_base=$DIFF_BASE" >> $GITHUB_OUTPUT
+          
+          # Count changed files
+          FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
+          echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
+          
+          # If single file, store its path and directory
+          if [ "$FILE_COUNT" -eq 1 ]; then
+            FILE_PATH=$(echo "$CHANGED_FILES" | head -n 1)
+            echo "single_file=$FILE_PATH" >> $GITHUB_OUTPUT
+            DIR_PATH=$(dirname "$FILE_PATH")
+            echo "single_dir=$DIR_PATH" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Generate release notes
+        id: release_notes
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        run: |
+          if [ "${{ steps.detect_changes.outputs.file_count }}" -eq "1" ]; then
+            # Single file - read README from same directory
+            README_PATH="${{ steps.detect_changes.outputs.single_dir }}/README.md"
+            if [ -f "$README_PATH" ]; then
+              {
+                echo "release_body<<EOF"
+                cat "$README_PATH"
+                echo "EOF"
+              } >> $GITHUB_OUTPUT
+            else
+              {
+                echo "release_body<<EOF"
+                echo "## ${{ steps.detect_changes.outputs.single_file }}"
+                echo ""
+                echo "Updated BOF file."
+                echo "EOF"
+              } >> $GITHUB_OUTPUT
+            fi
+          else
+            # Multiple files - create table
+            {
+              echo "release_body<<EOF"
+              echo "## Updated BOF Files"
+              echo ""
+              echo "| File | Status |"
+              echo "|------|--------|"
+              while IFS= read -r file; do
+                if [ -n "$file" ]; then
+                  # Check if file was added or modified
+                  if [ -z "${{ steps.detect_changes.outputs.diff_base }}" ]; then
+                    STATUS="Added"
+                  elif git diff --name-only --diff-filter=A ${{ steps.detect_changes.outputs.diff_base }} HEAD | grep -q "^$file$"; then
+                    STATUS="Added"
+                  else
+                    STATUS="Updated"
+                  fi
+                  echo "| \`$file\` | $STATUS |"
+                fi
+              done < changed_files.txt
+              echo "EOF"
+            } >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create release tag
+        id: create_tag
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        run: |
+          # Generate timestamp tag (YYYY-MM-DD-HHMMSS)
+          TIMESTAMP=$(date -u +"%Y-%m-%d-%H%M%S")
+          echo "tag=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "Created tag: $TIMESTAMP"
+      
+      - name: Prepare release assets list
+        id: prepare_assets
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        run: |
+          # Create a file list for the release action (one file per line)
+          ASSETS_LIST=""
+          while IFS= read -r file; do
+            if [ -n "$file" ] && [ -f "$file" ]; then
+              if [ -z "$ASSETS_LIST" ]; then
+                ASSETS_LIST="$file"
+              else
+                ASSETS_LIST="$ASSETS_LIST"$'\n'"$file"
+              fi
+            fi
+          done < changed_files.txt
+          echo "$ASSETS_LIST" > assets_list.txt
+          # Also output as multiline string for GitHub Actions
+          {
+            echo "assets<<EOF"
+            echo "$ASSETS_LIST"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+      
+      - name: Create GitHub Release
+        if: steps.detect_changes.outputs.has_changes == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.create_tag.outputs.tag }}
+          name: Release ${{ steps.create_tag.outputs.tag }}
+          body: ${{ steps.release_notes.outputs.release_body }}
+          draft: false
+          prerelease: false
+          files: ${{ steps.prepare_assets.outputs.assets }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
