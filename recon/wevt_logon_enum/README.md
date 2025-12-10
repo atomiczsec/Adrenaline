@@ -1,7 +1,7 @@
 # wevt_logon_enum BOF
 
 ## Summary
-Enumerates recent Security log logon events (Event ID 4624) via the wevtapi API and prints remote workstation name/IP plus the target username.
+Enumerates recent Security log (successful/failed) logon events (Event IDs 4624,4625,4672) via the wevtapi API and prints remote workstation name/IP plus the target username.
 
 ## Notes
 - Requires permission to read the Security log (typically admin or SYSTEM).
@@ -9,7 +9,7 @@ Enumerates recent Security log logon events (Event ID 4624) via the wevtapi API 
 ## Expected Output
 
 ```
-[i] Querying Security log for logon events (EventID 4624)...
+[i] Querying Security log for logon events (EventID 4624,4625,4672)...
 [+] user: alice               workstation: DESKTOP-1234
 [+] user: bob                 workstation: 10.0.0.24
 [+] user: carol               workstation: WORKSTATION-7F2A
