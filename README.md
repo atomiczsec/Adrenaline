@@ -12,6 +12,7 @@
 | **[app_count](recon/app_count/)**    | Counts the number of installed applications via the registry, de-duplicates, and prints. Applied to a large number of beacons, allows us to infer things about a device based on app count differences. |
 | **[netjoin_query](recon/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup.
 | **[window_list](recon/window_list/)**     | Enumerates the titles of all visible windows on the current user's desktop, optionally including Process IDs (PIDs).  |
+| **[wevt_logon_enum](recon/wevt_logon_enum/)**     | Enumerates recent Security log logon events (Event ID 4624) via the wevtapi API and prints remote workstation name/IP plus the target username. |
 
 ## Defense Detection
 
