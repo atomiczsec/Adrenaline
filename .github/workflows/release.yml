@@ -2,148 +2,195 @@ name: Auto Release on .o File Changes
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - '**/*.o'
+      - "**/*.o"
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history to compare changes
-      
-      - name: Detect changed .o files
-        id: detect_changes
+          fetch-depth: 0
+
+      - name: Detect changed .o files (robust for multi-commit pushes)
+        id: detect
+        shell: bash
         run: |
-          # Check if this is the first commit
-          if [ $(git rev-list --count HEAD) -eq 1 ]; then
-            # First commit - get all .o files
-            CHANGED_FILES=$(git ls-tree -r --name-only HEAD | grep '\.o$' || true)
-            DIFF_BASE=""
+          set -euo pipefail
+
+          HEAD_SHA="${GITHUB_SHA}"
+          BASE_SHA="${{ github.event.before }}"
+
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "No base SHA (first push). Using all .o files in HEAD."
+            git ls-tree -r --name-only "${HEAD_SHA}" | grep -E '\.o$' > changed_o.txt || true
+
+            # Mark them as "A" so downstream code is consistent
+            awk '{print "A\t" $0}' changed_o.txt > changed_o_status.txt || true
           else
-            # Compare with previous commit
-            CHANGED_FILES=$(git diff --name-only --diff-filter=AM HEAD~1 HEAD | grep '\.o$' || true)
-            DIFF_BASE="HEAD~1"
+            echo "Diffing ${BASE_SHA} -> ${HEAD_SHA}"
+            git diff --name-status --diff-filter=AM "${BASE_SHA}" "${HEAD_SHA}" | awk '$2 ~ /\.o$/ {print}' > changed_o_status.txt || true
+            awk '{print $2}' changed_o_status.txt > changed_o.txt || true
           fi
-          
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "No .o files changed"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+
+          if [[ ! -s changed_o.txt ]]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-          echo "$CHANGED_FILES" > changed_files.txt
-          echo "diff_base=$DIFF_BASE" >> $GITHUB_OUTPUT
-          
-          # Count changed files
-          FILE_COUNT=$(echo "$CHANGED_FILES" | wc -l | tr -d ' ')
-          echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
-          
-          # If single file, store its path and directory
-          if [ "$FILE_COUNT" -eq 1 ]; then
-            FILE_PATH=$(echo "$CHANGED_FILES" | head -n 1)
-            echo "single_file=$FILE_PATH" >> $GITHUB_OUTPUT
-            DIR_PATH=$(dirname "$FILE_PATH")
-            echo "single_dir=$DIR_PATH" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Generate release notes
-        id: release_notes
-        if: steps.detect_changes.outputs.has_changes == 'true'
+
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+          FILE_COUNT="$(wc -l < changed_o.txt | tr -d ' ')"
+          echo "file_count=${FILE_COUNT}" >> "$GITHUB_OUTPUT"
+
+          echo "Changed .o files:"
+          cat changed_o_status.txt
+
+      - name: Build release notes (grouped by folder, README per folder)
+        id: notes
+        if: steps.detect.outputs.has_changes == 'true'
+        shell: bash
         run: |
-          if [ "${{ steps.detect_changes.outputs.file_count }}" -eq "1" ]; then
-            # Single file - read README from same directory
-            README_PATH="${{ steps.detect_changes.outputs.single_dir }}/README.md"
-            if [ -f "$README_PATH" ]; then
-              {
-                echo "release_body<<EOF"
-                cat "$README_PATH"
-                echo "EOF"
-              } >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          BASE_SHA="${{ steps.detect.outputs.base_sha }}"
+          HEAD_SHA="${{ steps.detect.outputs.head_sha }}"
+
+          # Map: dir -> markdown rows
+          declare -A DIR_ROWS
+          declare -A DIR_HAS_README
+
+          # Create a stable list of dirs involved
+          while IFS=$'\t' read -r status file; do
+            [[ -z "${file}" ]] && continue
+            dir="$(dirname "${file}")"
+            # Handle root-level files (dirname returns ".")
+            if [[ "${dir}" == "." ]]; then
+              dir=""
+            fi
+            
+            # Friendly status
+            if [[ "${status}" == "A" ]]; then s="Added"; else s="Updated"; fi
+
+            # Get file stats (handle missing files gracefully)
+            if [[ -f "${file}" ]]; then
+              size_bytes="$(stat -c%s "${file}" 2>/dev/null || echo "0")"
+              sha256="$(sha256sum "${file}" 2>/dev/null | awk '{print $1}' || echo "N/A")"
             else
-              {
-                echo "release_body<<EOF"
-                echo "## ${{ steps.detect_changes.outputs.single_file }}"
-                echo ""
-                echo "Updated BOF file."
-                echo "EOF"
-              } >> $GITHUB_OUTPUT
+              size_bytes="0"
+              sha256="N/A (file not found)"
             fi
-          else
-            # Multiple files - create table
-            {
-              echo "release_body<<EOF"
-              echo "## Updated BOF Files"
-              echo ""
-              echo "| File | Status |"
-              echo "|------|--------|"
-              while IFS= read -r file; do
-                if [ -n "$file" ]; then
-                  # Check if file was added or modified
-                  if [ -z "${{ steps.detect_changes.outputs.diff_base }}" ]; then
-                    STATUS="Added"
-                  elif git diff --name-only --diff-filter=A ${{ steps.detect_changes.outputs.diff_base }} HEAD | grep -q "^$file$"; then
-                    STATUS="Added"
-                  else
-                    STATUS="Updated"
-                  fi
-                  echo "| \`$file\` | $STATUS |"
-                fi
-              done < changed_files.txt
-              echo "EOF"
-            } >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Create release tag
-        id: create_tag
-        if: steps.detect_changes.outputs.has_changes == 'true'
-        run: |
-          # Generate timestamp tag (YYYY-MM-DD-HHMMSS)
-          TIMESTAMP=$(date -u +"%Y-%m-%d-%H%M%S")
-          echo "tag=$TIMESTAMP" >> $GITHUB_OUTPUT
-          echo "Created tag: $TIMESTAMP"
-      
-      - name: Prepare release assets list
-        id: prepare_assets
-        if: steps.detect_changes.outputs.has_changes == 'true'
-        run: |
-          # Create a file list for the release action (one file per line)
-          ASSETS_LIST=""
-          while IFS= read -r file; do
-            if [ -n "$file" ] && [ -f "$file" ]; then
-              if [ -z "$ASSETS_LIST" ]; then
-                ASSETS_LIST="$file"
-              else
-                ASSETS_LIST="$ASSETS_LIST"$'\n'"$file"
-              fi
+
+            DIR_ROWS["$dir"]+=$'| `'"${file}"$'` | '"${s}"$' | `'"${size_bytes}"$'` | `'"${sha256}"$'` |\n'
+
+            # Check for README (handle root and subdirectories)
+            readme_path="${dir:+${dir}/}README.md"
+            if [[ -f "${readme_path}" ]]; then
+              DIR_HAS_README["$dir"]="true"
             fi
-          done < changed_files.txt
-          echo "$ASSETS_LIST" > assets_list.txt
-          # Also output as multiline string for GitHub Actions
+          done < changed_o_status.txt
+
           {
-            echo "assets<<EOF"
-            echo "$ASSETS_LIST"
+            echo "release_body<<EOF"
+            echo "## BOF Object Updates"
+            echo ""
+            echo "**Range:** \`${BASE_SHA:0:7}\` → \`${HEAD_SHA:0:7}\`"
+            echo ""
+            echo "**Count:** ${{ steps.detect.outputs.file_count }} file(s)"
+            echo ""
+            echo "### Integrity"
+            echo "Each asset includes a SHA256 in the tables below so operators can verify downloads."
+            echo ""
+
+            for dir in $(printf '%s\n' "${!DIR_ROWS[@]}" | sort); do
+              if [[ -z "${dir}" ]]; then
+                echo "## Module: \`(root)\`"
+              else
+                echo "## Module: \`${dir}\`"
+              fi
+              echo ""
+              
+              readme_path="${dir:+${dir}/}README.md"
+              if [[ "${DIR_HAS_README[$dir]:-}" == "true" && -f "${readme_path}" ]]; then
+                echo "<details><summary><b>README.md</b> (click to expand)</summary>"
+                echo ""
+                echo '```'
+                # Avoid breaking markdown if README is huge, but still keep it useful
+                head -n 200 "${readme_path}" || true
+                echo '```'
+                echo ""
+                echo "</details>"
+                echo ""
+              fi
+
+              echo "| File | Status | Size (bytes) | SHA256 |"
+              echo "|------|--------|-------------:|--------|"
+              # Print the accumulated rows
+              printf "%s" "${DIR_ROWS[$dir]}"
+              echo ""
+            done
+
             echo "EOF"
-          } >> $GITHUB_OUTPUT
-      
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release assets (all changed .o files)
+        id: assets
+        if: steps.detect.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ASSETS=""
+          while IFS= read -r file; do
+            [[ -z "${file}" ]] && continue
+            if [[ -f "${file}" ]]; then
+              ASSETS+="${file}"$'\n'
+            else
+              echo "Warning: File ${file} not found, skipping" >&2
+            fi
+          done < changed_o.txt
+
+          if [[ -z "${ASSETS}" ]]; then
+            echo "error=No valid asset files found" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # softprops/action-gh-release expects newline-separated list
+          {
+            echo "files<<EOF"
+            printf "%s" "${ASSETS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create release tag
+        id: tag
+        if: steps.detect.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          TS="$(date -u +"%Y-%m-%d-%H%M%S")"
+          SHORT="${GITHUB_SHA:0:7}"
+          TAG="${TS}-${SHORT}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Created tag: ${TAG}"
+
       - name: Create GitHub Release
-        if: steps.detect_changes.outputs.has_changes == 'true'
+        if: steps.detect.outputs.has_changes == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.create_tag.outputs.tag }}
-          name: Release ${{ steps.create_tag.outputs.tag }}
-          body: ${{ steps.release_notes.outputs.release_body }}
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Release ${{ steps.tag.outputs.tag }}
+          body: ${{ steps.notes.outputs.release_body }}
           draft: false
           prerelease: false
-          files: ${{ steps.prepare_assets.outputs.assets }}
+          files: ${{ steps.assets.outputs.files }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
