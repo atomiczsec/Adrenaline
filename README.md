@@ -45,6 +45,12 @@
 | **[aad_compliance_status](env_assessment/aad_compliance_status/)**           | Checks Azure Active Directory device compliance status and retrieves Intune/MDM enrollment information by querying registry keys for MDM enrollments and compliance state. |
 | **[wef_detect](env_assessment/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
 
+## Community
+
+| **BOF**                  | **Use**                                                                                                                                                         |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **[schtask_enum](community/schtask_enum/)**     | Enumerates scheduled tasks on Windows systems using the Task Scheduler COM interface. Provides a summary of tasks including their state, schedule, and configuration without overwhelming the beacon with XML data. Original Source: [TrustedSec CS-Situational-Awareness-BOF](https://github.com/trustedsec/CS-Situational-Awareness-BOF) |
+
 ---
 
 <h3 align="center">Connect with me:</h3>
