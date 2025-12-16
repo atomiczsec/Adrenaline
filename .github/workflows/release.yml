@@ -122,10 +122,9 @@ jobs:
               if [[ "${DIR_HAS_README[$dir]:-}" == "true" && -f "${readme_path}" ]]; then
                 echo "<details><summary><b>README.md</b> (click to expand)</summary>"
                 echo ""
-                echo '```'
-                # Avoid breaking markdown if README is huge, but still keep it useful
+                # Include README content directly so markdown is properly rendered
+                # Limit to first 200 lines to avoid huge READMEs breaking release notes
                 head -n 200 "${readme_path}" || true
-                echo '```'
                 echo ""
                 echo "</details>"
                 echo ""
