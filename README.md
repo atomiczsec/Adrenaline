@@ -5,6 +5,16 @@
 
 <div align='center'>
 
+## Table of Contents
+
+- [Recon](#recon)
+- [Defense Detection](#defense-detection)
+- [Target Prioritization](#target-prioritization)
+- [Credential Access](#credential-access)
+- [Environment Assessment](#environment-assessment)
+- [Community](#community)
+
+
 ## Recon
 
 | **BOF**                  | **Use**                                                                                                                                                         |
@@ -64,5 +74,5 @@
 
 ---
 
-**DISCLAIMER:** The creators of this repository are not responsible for any harm or damage that may occur as a result of using the information or code provided in this repository.
-By accessing and using this repository, you acknowledge and agree that you do so at your own risk. 
+**DISCLAIMER:** The creators and contributors of this repository accept no liability for any loss, damage, or consequences resulting from the use of the information or code contained in this repo. By utilizing this repo, you acknowledge and accept full responsibility for your actions. Use at your own risk.
+
