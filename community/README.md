@@ -2,7 +2,7 @@
 
 The `community/` directory collects BOFs that are from outside this repository (the community) and have been fit to follow the framework constraints:
 
-- No dependency on `base.c`, `bofdefs.h`, or queue helpers
+- No dependency on repository specific framework headers, implementations, or utility libraries
 - No CRT
 - Standardized output
 - Safety caps to avoid hanging
