@@ -7,13 +7,14 @@
 
 ## Table of Contents
 
-- [Recon](#recon)
-- [Defense Detection](#defense-detection)
-- [Target Prioritization](#target-prioritization)
-- [Credential Access](#credential-access)
-- [Environment Assessment](#environment-assessment)
-- [Community](#community)
+[Recon](#recon)  
+[Defense Detection](#defense-detection)  
+[Target Prioritization](#target-prioritization)  
+[Credential Access](#credential-access)  
+[Environment Assessment](#environment-assessment)  
+[Community](#community)
 
+</div>
 
 ## Recon
 
