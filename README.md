@@ -12,6 +12,7 @@
 [Target Prioritization](#target-prioritization)  
 [Credential Access](#credential-access)  
 [Environment Assessment](#environment-assessment)  
+[Collection](#collection)  
 [Community](#community)
 
 </div>
@@ -22,6 +23,7 @@
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **[app_count](recon/app_count/)**    | Counts the number of installed applications via the registry, de-duplicates, and prints. Applied to a large number of beacons, allows us to infer things about a device based on app count differences. |
 | **[netjoin_query](recon/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup.
+| **[wallpaper_enum](recon/wallpaper_enum/)**     | Enumerates the current desktop wallpaper path for each attached monitor using the modern IDesktopWallpaper COM interface. Centralized wallpapers are sometimes on internal SMB shares or imaging servers, revealing network paths, domain trusts, and policy enforcement without touching disk or the network. |
 | **[window_list](recon/window_list/)**     | Enumerates the titles of all visible windows on the current user's desktop, optionally including Process IDs (PIDs).  |
 | **[wevt_logon_enum](recon/wevt_logon_enum/)**     | Enumerates recent Security log (successful/failed) logon events (Event IDs 4624,4625,4672) via the wevtapi API and prints remote workstation name/IP plus the target username. |
 
@@ -55,6 +57,12 @@
 | **[aad_ca_policy](env_assessment/aad_ca_policy/)**           | Enumerates Azure Active Directory Conditional Access policies and related security configurations by scanning registry keys for policy enforcement settings and MFA requirements. |
 | **[aad_compliance_status](env_assessment/aad_compliance_status/)**           | Checks Azure Active Directory device compliance status and retrieves Intune/MDM enrollment information by querying registry keys for MDM enrollments and compliance state. |
 | **[wef_detect](env_assessment/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
+
+## Collection
+
+| **BOF**                  | **Use**                                                                                                                                                         |
+|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **[ai_surface](collection/ai_surface/)**     | Maps which AI/Copilot tools are present on an endpoint and reports their key storage locations. Checks for Windows Copilot, Office Copilot, Edge Copilot, GitHub Copilot, and third-party AI tools (ChatGPT, Claude, Cursor IDE). |
 
 ## Community
 
