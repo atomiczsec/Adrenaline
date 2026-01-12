@@ -48,6 +48,7 @@
 | **[window_handles_enum](cred_access/window_handles_enum/)**  | Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.                                                      |
 | **[clipboard_grab](cred_access/clipboard_grab/)**       | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
 | **[process_tokens_list](cred_access/process_tokens_list/)**       | Enumerates accessible tokens from running processes, showing user context, token type (primary/impersonation), and impersonation level. Supports optional filtering by PID or process name. SeDebugPrivilege is disabled by default for OPSEC. |
+| **[certstore_loot](cred_access/certstore_loot/)**       | Enumerates local certificate stores to find certificates with exportable private keys and provides you with the path to export them. |
 
 ## Environment Assessment
 
