@@ -57,7 +57,6 @@
 | **[bitlocker_status](env_assessment/bitlocker_status/)**     | Enumerates BitLocker encryption status, policy configurations, and recovery key backup locations by scanning registry keys.                                             |
 | **[applocker_policy](env_assessment/applocker_policy/)**     | Enumerates AppLocker policy configurations, rule collections, and enforcement modes by scanning the relevant registry keys.                                             |
 | **[mdm_policy_artifacts](env_assessment/mdm_policy_artifacts/)**           | Uses a scoring model to assess MDM enrollment posture on Windows systems by evaluating indicators including join state, scheduled tasks, policy configuration, and enrollment artifacts. |
-| **[aad_compliance_status](env_assessment/aad_compliance_status/)**           | Checks Azure Active Directory device compliance status and retrieves Intune/MDM enrollment information by querying registry keys for MDM enrollments and compliance state. |
 | **[wef_detect](env_assessment/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
 
 ## Collection
