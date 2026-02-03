@@ -206,7 +206,7 @@ void go(char *args, unsigned long alen) {
     guidBuf[guidLen] = '\0';
 
     if (guidBuf[0] == '\0') {
-        BeaconPrintf(CALLBACK_ERROR, usageMsg);
+        BeaconPrintf(CALLBACK_ERROR, "[-] Usage: com_probe <GUID> [IID]\n");
         return;
     }
 
