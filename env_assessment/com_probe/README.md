@@ -2,6 +2,8 @@
 
 Probe whether a COM object can be instantiated from a given CLSID. Tries in-process activation first (`CLSCTX_INPROC_SERVER`), falls back to local server (`CLSCTX_LOCAL_SERVER`). Objects are released after.
 
+**Note:** COM's `CoCreateInstance` performs extensive registry lookups, when running with sysmon, it generated ~145 events per execution. Use with caution.
+
 ## Usage
 
 ```
