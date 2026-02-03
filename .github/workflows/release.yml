@@ -5,71 +5,96 @@ on:
     branches: [main]
     paths:
       - "**/*.o"
+      - "**/*.x64.o"
+      - "**/*.x86.o"
+  workflow_dispatch:
+    inputs:
+      module_path:
+        description: 'Module path to release (e.g., env_assessment/com_probe)'
+        required: true
+        type: string
+      tag_suffix:
+        description: 'Optional tag suffix (defaults to timestamp-SHA)'
+        required: false
+        type: string
 
 jobs:
-  release:
+  detect:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+    outputs:
+      matrix: ${{ steps.build_matrix.outputs.matrix }}
+      has_changes: ${{ steps.build_matrix.outputs.has_changes }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect changed .o files (robust for multi-commit pushes)
-        id: detect
+      - name: Build module matrix
+        id: build_matrix
         shell: bash
         run: |
           set -euo pipefail
 
+          # Handle workflow_dispatch (manual trigger)
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            MODULE_PATH="${{ github.event.inputs.module_path }}"
+            
+            # Validate module path exists
+            if [[ ! -d "${MODULE_PATH}" ]]; then
+              echo "Error: Module path '${MODULE_PATH}' does not exist" >&2
+              exit 1
+            fi
+            
+            # Find all .o files in the module directory
+            mapfile -t o_files < <(find "${MODULE_PATH}" -type f \( -name "*.o" -o -name "*.x64.o" -o -name "*.x86.o" \) 2>/dev/null || true)
+            
+            if [[ ${#o_files[@]} -eq 0 ]]; then
+              echo "Error: No .o files found in '${MODULE_PATH}'" >&2
+              exit 1
+            fi
+            
+            # Build JSON matrix with single module entry
+            MODULE_DIR="${MODULE_PATH}"
+            FILES_JSON=$(printf '%s\n' "${o_files[@]}" | jq -R . | jq -s .)
+            
+            MATRIX=$(jq -n \
+              --arg dir "${MODULE_DIR}" \
+              --argjson files "${FILES_JSON}" \
+              '[{module_dir: $dir, files: $files}]')
+            
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+            echo "Built matrix for manual release: ${MODULE_PATH}"
+            echo "${MATRIX}" | jq .
+            exit 0
+          fi
+
+          # Handle push trigger (automatic)
           HEAD_SHA="${GITHUB_SHA}"
           BASE_SHA="${{ github.event.before }}"
 
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             echo "No base SHA (first push). Using all .o files in HEAD."
-            git ls-tree -r --name-only "${HEAD_SHA}" | grep -E '\.o$' > changed_o.txt || true
-
-            # Mark them as "A" so downstream code is consistent
-            awk '{print "A\t" $0}' changed_o.txt > changed_o_status.txt || true
+            git ls-tree -r --name-only "${HEAD_SHA}" | grep -E '\.(o|x64\.o|x86\.o)$' > changed_o.txt || true
           else
             echo "Diffing ${BASE_SHA} -> ${HEAD_SHA}"
-            git diff --name-status --diff-filter=AM "${BASE_SHA}" "${HEAD_SHA}" | awk '$2 ~ /\.o$/ {print}' > changed_o_status.txt || true
-            awk '{print $2}' changed_o_status.txt > changed_o.txt || true
+            git diff --name-only --diff-filter=ACMR "${BASE_SHA}" "${HEAD_SHA}" | grep -E '\.(o|x64\.o|x86\.o)$' > changed_o.txt || true
           fi
 
           if [[ ! -s changed_o.txt ]]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
-          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
-
-          FILE_COUNT="$(wc -l < changed_o.txt | tr -d ' ')"
-          echo "file_count=${FILE_COUNT}" >> "$GITHUB_OUTPUT"
-
           echo "Changed .o files:"
-          cat changed_o_status.txt
+          cat changed_o.txt
 
-      - name: Build release notes (grouped by folder, README per folder)
-        id: notes
-        if: steps.detect.outputs.has_changes == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          BASE_SHA="${{ steps.detect.outputs.base_sha }}"
-          HEAD_SHA="${{ steps.detect.outputs.head_sha }}"
-
-          # Map: dir -> markdown rows
-          declare -A DIR_ROWS
-          declare -A DIR_HAS_README
-
-          # Create a stable list of dirs involved
-          while IFS=$'\t' read -r status file; do
+          # Group files by module directory
+          declare -A MODULE_FILES
+          
+          while IFS= read -r file; do
             [[ -z "${file}" ]] && continue
             dir="$(dirname "${file}")"
             # Handle root-level files (dirname returns ".")
@@ -77,119 +102,183 @@ jobs:
               dir=""
             fi
             
-            # Friendly status
-            if [[ "${status}" == "A" ]]; then s="Added"; else s="Updated"; fi
-
-            # Get file stats (handle missing files gracefully)
-            if [[ -f "${file}" ]]; then
-              size_bytes="$(stat -c%s "${file}" 2>/dev/null || echo "0")"
-              sha256="$(sha256sum "${file}" 2>/dev/null | awk '{print $1}' || echo "N/A")"
+            # Add file to module's array
+            if [[ -z "${MODULE_FILES[$dir]:-}" ]]; then
+              MODULE_FILES[$dir]="${file}"
             else
-              size_bytes="0"
-              sha256="N/A (file not found)"
+              MODULE_FILES[$dir]+=$'\n'"${file}"
             fi
+          done < changed_o.txt
 
-            DIR_ROWS["$dir"]+=$'| `'"${file}"$'` | '"${s}"$' | `'"${size_bytes}"$'` | `'"${sha256}"$'` |\n'
+          # Build JSON matrix
+          MATRIX_ENTRIES=()
+          
+          for dir in $(printf '%s\n' "${!MODULE_FILES[@]}" | sort); do
+            # Convert newline-separated files to JSON array
+            FILES_JSON=$(printf '%s\n' "${MODULE_FILES[$dir]}" | jq -R . | jq -s .)
+            
+            ENTRY=$(jq -n \
+              --arg dir "${dir}" \
+              --argjson files "${FILES_JSON}" \
+              '{module_dir: $dir, files: $files}')
+            
+            MATRIX_ENTRIES+=("${ENTRY}")
+          done
 
-            # Check for README (handle root and subdirectories)
-            readme_path="${dir:+${dir}/}README.md"
-            if [[ -f "${readme_path}" ]]; then
-              DIR_HAS_README["$dir"]="true"
-            fi
-          done < changed_o_status.txt
+          # Combine all entries into final matrix
+          MATRIX=$(printf '%s\n' "${MATRIX_ENTRIES[@]}" | jq -s .)
+          
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "Built matrix:"
+          echo "${MATRIX}" | jq .
 
-          {
-            echo "release_body<<EOF"
-            echo "## BOF Object Updates"
-            echo ""
-            echo "**Range:** \`${BASE_SHA:0:7}\` → \`${HEAD_SHA:0:7}\`"
-            echo ""
-            echo "**Count:** ${{ steps.detect.outputs.file_count }} file(s)"
-            echo ""
-            echo "### Integrity"
-            echo "Each asset includes a SHA256 in the tables below so operators can verify downloads."
-            echo ""
+  release:
+    needs: detect
+    if: needs.detect.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        module: ${{ fromJson(needs.detect.outputs.matrix) }}
+      fail-fast: false
 
-            for dir in $(printf '%s\n' "${!DIR_ROWS[@]}" | sort); do
-              if [[ -z "${dir}" ]]; then
-                echo "## Module: \`(root)\`"
-              else
-                echo "## Module: \`${dir}\`"
-              fi
-              echo ""
-              
-              readme_path="${dir:+${dir}/}README.md"
-              if [[ "${DIR_HAS_README[$dir]:-}" == "true" && -f "${readme_path}" ]]; then
-                echo "<details><summary><b>README.md</b> (click to expand)</summary>"
-                echo ""
-                # Include README content directly so markdown is properly rendered
-                # Limit to first 200 lines to avoid huge READMEs breaking release notes
-                head -n 200 "${readme_path}" || true
-                echo ""
-                echo "</details>"
-                echo ""
-              fi
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-              echo "| File | Status | Size (bytes) | SHA256 |"
-              echo "|------|--------|-------------:|--------|"
-              # Print the accumulated rows
-              printf "%s" "${DIR_ROWS[$dir]}"
-              echo ""
-            done
-
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Prepare release assets (all changed .o files)
-        id: assets
-        if: steps.detect.outputs.has_changes == 'true'
+      - name: Prepare module release
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
 
-          ASSETS=""
-          while IFS= read -r file; do
-            [[ -z "${file}" ]] && continue
-            if [[ -f "${file}" ]]; then
-              ASSETS+="${file}"$'\n'
+          MODULE_DIR="${{ matrix.module.module_dir }}"
+          HEAD_SHA="${GITHUB_SHA}"
+          BASE_SHA="${{ github.event.before }}"
+
+          # Extract files array from matrix
+          echo "${{ toJson(matrix.module.files) }}" | jq -r '.[]' > module_files.txt
+
+          # Determine commit range for release notes
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # For manual releases, use current HEAD
+            BASE_SHA="${HEAD_SHA}"
+            COMMIT_RANGE="${HEAD_SHA:0:7}"
+          else
+            if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+              BASE_SHA="${HEAD_SHA}"
+              COMMIT_RANGE="${HEAD_SHA:0:7}"
             else
-              echo "Warning: File ${file} not found, skipping" >&2
+              COMMIT_RANGE="${BASE_SHA:0:7} → ${HEAD_SHA:0:7}"
             fi
-          done < changed_o.txt
+          fi
+
+          # Build file list with stats
+          ASSETS=""
+          FILE_COUNT=0
+          
+          {
+            echo "release_body<<EOF"
+            echo "## Module: \`${MODULE_DIR}\`"
+            echo ""
+            echo "**Commit Range:** \`${COMMIT_RANGE}\`"
+            echo ""
+            echo "### Integrity"
+            echo "Each asset includes a SHA256 in the table below so operators can verify downloads."
+            echo ""
+            
+            # Include README if present
+            readme_path="${MODULE_DIR:+${MODULE_DIR}/}README.md"
+            if [[ -f "${readme_path}" ]]; then
+              echo "<details><summary><b>README.md</b> (click to expand)</summary>"
+              echo ""
+              head -n 200 "${readme_path}" || true
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+            
+            echo "| File | Size (bytes) | SHA256 |"
+            echo "|------|-------------:|--------|"
+            
+            while IFS= read -r file; do
+              [[ -z "${file}" ]] && continue
+              
+              if [[ -f "${file}" ]]; then
+                size_bytes="$(stat -c%s "${file}" 2>/dev/null || echo "0")"
+                sha256="$(sha256sum "${file}" 2>/dev/null | awk '{print $1}' || echo "N/A")"
+                
+                echo "| \`${file}\` | \`${size_bytes}\` | \`${sha256}\` |"
+                
+                ASSETS+="${file}"$'\n'
+                ((FILE_COUNT++)) || true
+              else
+                echo "Warning: File ${file} not found, skipping" >&2
+              fi
+            done < module_files.txt
+            
+            echo ""
+            echo "**Total Files:** ${FILE_COUNT}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           if [[ -z "${ASSETS}" ]]; then
-            echo "error=No valid asset files found" >> "$GITHUB_OUTPUT"
+            echo "error=No valid asset files found for module ${MODULE_DIR}" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
-          # softprops/action-gh-release expects newline-separated list
+          # Prepare assets list
           {
             echo "files<<EOF"
             printf "%s" "${ASSETS}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+          echo "file_count=${FILE_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "Prepared release for module: ${MODULE_DIR} with ${FILE_COUNT} file(s)"
+
       - name: Create release tag
         id: tag
-        if: steps.detect.outputs.has_changes == 'true'
         shell: bash
         run: |
           set -euo pipefail
+
+          MODULE_DIR="${{ matrix.module.module_dir }}"
+          HEAD_SHA="${GITHUB_SHA}"
+          
+          # Sanitize module path for tag (replace / with -)
+          SANITIZED_DIR="${MODULE_DIR//\//-}"
+          
+          # Handle root-level modules
+          if [[ -z "${SANITIZED_DIR}" ]]; then
+            SANITIZED_DIR="root"
+          fi
+          
           TS="$(date -u +"%Y-%m-%d-%H%M%S")"
-          SHORT="${GITHUB_SHA:0:7}"
-          TAG="${TS}-${SHORT}"
+          SHORT="${HEAD_SHA:0:7}"
+          
+          # Use custom tag suffix if provided via workflow_dispatch
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.tag_suffix }}" ]]; then
+            TAG="${SANITIZED_DIR}-${{ github.event.inputs.tag_suffix }}"
+          else
+            TAG="${SANITIZED_DIR}-${TS}-${SHORT}"
+          fi
+          
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Created tag: ${TAG}"
 
       - name: Create GitHub Release
-        if: steps.detect.outputs.has_changes == 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Release ${{ steps.tag.outputs.tag }}
-          body: ${{ steps.notes.outputs.release_body }}
+          body: ${{ steps.prepare.outputs.release_body }}
           draft: false
           prerelease: false
-          files: ${{ steps.assets.outputs.files }}
+          files: ${{ steps.prepare.outputs.files }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
