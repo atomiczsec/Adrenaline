@@ -58,6 +58,8 @@
 | **[applocker_policy](env_assessment/applocker_policy/)**     | Enumerates AppLocker policy configurations, rule collections, and enforcement modes by scanning the relevant registry keys.                                             |
 | **[mdm_policy_artifacts](env_assessment/mdm_policy_artifacts/)**           | Uses a scoring model to assess MDM enrollment posture on Windows systems by evaluating indicators including join state, scheduled tasks, policy configuration, and enrollment artifacts. |
 | **[wef_detect](env_assessment/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
+| **[com_probe](env_assessment/com_probe/)**           | Probe whether a COM object can be instantiated from a given CLSID. |
+
 
 ## Collection
 
