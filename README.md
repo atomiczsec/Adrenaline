@@ -5,7 +5,7 @@
 
 <div align='center'>
 
-## Table of Contents (Mirrors MITRE taxonomy)
+## Table of Contents (MITRE taxonomy)
 
 [Collection](#collection)  
 [Community](#community)  
