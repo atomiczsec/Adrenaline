@@ -64,7 +64,11 @@ jobs:
               '[{module_dir: $dir, files: $files}]')
             
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+            {
+              echo "matrix<<EOF"
+              echo "${MATRIX}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
             echo "Built matrix for manual release: ${MODULE_PATH}"
             echo "${MATRIX}" | jq .
             exit 0
@@ -129,7 +133,11 @@ jobs:
           MATRIX=$(printf '%s\n' "${MATRIX_ENTRIES[@]}" | jq -s .)
           
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix<<EOF"
+            echo "${MATRIX}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "Built matrix:"
           echo "${MATRIX}" | jq .
 
