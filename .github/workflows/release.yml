@@ -30,11 +30,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
       - name: Build module matrix
         id: build_matrix
         shell: bash
         run: |
           set -euo pipefail
+          
+          # Verify jq is available
+          if ! command -v jq &> /dev/null; then
+            echo "Error: jq is not installed" >&2
+            exit 1
+          fi
 
           # Handle workflow_dispatch (manual trigger)
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -58,15 +69,22 @@ jobs:
             MODULE_DIR="${MODULE_PATH}"
             FILES_JSON=$(printf '%s\n' "${o_files[@]}" | jq -R . | jq -s .)
             
-            MATRIX=$(jq -n \
+            MATRIX=$(jq -n -c \
               --arg dir "${MODULE_DIR}" \
               --argjson files "${FILES_JSON}" \
               '[{module_dir: $dir, files: $files}]')
             
+            # Validate JSON before outputting
+            if ! echo "${MATRIX}" | jq empty >/dev/null 2>&1; then
+              echo "Error: Invalid JSON matrix generated" >&2
+              exit 1
+            fi
+            
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             {
               echo "matrix<<EOF"
-              echo "${MATRIX}"
+              echo -n "${MATRIX}"
+              echo ""
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
             echo "Built matrix for manual release: ${MODULE_PATH}"
@@ -130,12 +148,26 @@ jobs:
           done
 
           # Combine all entries into final matrix
-          MATRIX=$(printf '%s\n' "${MATRIX_ENTRIES[@]}" | jq -s .)
+          if [[ ${#MATRIX_ENTRIES[@]} -eq 0 ]]; then
+            echo "Error: No matrix entries to combine" >&2
+            exit 1
+          fi
+          
+          MATRIX=$(printf '%s\n' "${MATRIX_ENTRIES[@]}" | jq -s -c .)
+          
+          # Validate JSON before outputting
+          if ! echo "${MATRIX}" | jq empty >/dev/null 2>&1; then
+            echo "Error: Invalid JSON matrix generated" >&2
+            echo "Matrix content:" >&2
+            printf '%s\n' "${MATRIX_ENTRIES[@]}" >&2
+            exit 1
+          fi
           
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
           {
             echo "matrix<<EOF"
-            echo "${MATRIX}"
+            echo -n "${MATRIX}"
+            echo ""
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           echo "Built matrix:"
@@ -169,7 +201,13 @@ jobs:
           BASE_SHA="${{ github.event.before }}"
 
           # Extract files array from matrix
-          echo "${{ toJson(matrix.module.files) }}" | jq -r '.[]' > module_files.txt
+          FILES_JSON="${{ toJson(matrix.module.files) }}"
+          if ! echo "${FILES_JSON}" | jq empty >/dev/null 2>&1; then
+            echo "Error: Invalid files JSON from matrix" >&2
+            echo "Files JSON: ${FILES_JSON}" >&2
+            exit 1
+          fi
+          echo "${FILES_JSON}" | jq -r '.[]' > module_files.txt
 
           # Determine commit range for release notes
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
