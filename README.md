@@ -26,6 +26,7 @@
 
 | **BOF**                  | **Use**                                                                                                                                                         |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **[notepad_grab](community/notepad_grab/)**     | Extracts and returns plain text directly from open Notepad windows by reading memory, allowing operators to recover unsaved or in-memory notes. Useful for data collection from live endpoints. |
 | **[schtask_enum](community/schtask_enum/)**     | Enumerates scheduled tasks on Windows systems using the Task Scheduler COM interface. Provides a summary of tasks including their state, schedule, and configuration without overwhelming the beacon with XML data. Original Source: [TrustedSec CS-Situational-Awareness-BOF](https://github.com/trustedsec/CS-Situational-Awareness-BOF) |
 | **[session_view](community/session_view/)**     | Enumerates Windows Terminal Services sessions, displaying session IDs, usernames, domains, connection states, and session LUIDs. Original Source: [SessionView](https://github.com/lsecqt/SessionView) by lsecqt |
 
