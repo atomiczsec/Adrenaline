@@ -30,34 +30,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install jq
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
       - name: Build module matrix
         id: build_matrix
         shell: bash
         run: |
           set -euo pipefail
-          
-          # Verify jq is available
-          if ! command -v jq &> /dev/null; then
-            echo "Error: jq is not installed" >&2
-            exit 1
-          fi
 
-          # Handle workflow_dispatch (manual trigger)
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             MODULE_PATH="${{ github.event.inputs.module_path }}"
             
-            # Validate module path exists
             if [[ ! -d "${MODULE_PATH}" ]]; then
               echo "Error: Module path '${MODULE_PATH}' does not exist" >&2
               exit 1
             fi
             
-            # Find all .o files in the module directory
             mapfile -t o_files < <(find "${MODULE_PATH}" -type f \( -name "*.o" -o -name "*.x64.o" -o -name "*.x86.o" \) 2>/dev/null || true)
             
             if [[ ${#o_files[@]} -eq 0 ]]; then
@@ -65,7 +51,6 @@ jobs:
               exit 1
             fi
             
-            # Build JSON matrix with single module entry
             MODULE_DIR="${MODULE_PATH}"
             FILES_JSON=$(printf '%s\n' "${o_files[@]}" | jq -R . | jq -s .)
             
@@ -74,17 +59,10 @@ jobs:
               --argjson files "${FILES_JSON}" \
               '[{module_dir: $dir, files: $files}]')
             
-            # Validate JSON before outputting
-            if ! echo "${MATRIX}" | jq empty >/dev/null 2>&1; then
-              echo "Error: Invalid JSON matrix generated" >&2
-              exit 1
-            fi
-            
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             {
               echo "matrix<<EOF"
-              echo -n "${MATRIX}"
-              echo ""
+              echo "${MATRIX}"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
             echo "Built matrix for manual release: ${MODULE_PATH}"
@@ -92,7 +70,6 @@ jobs:
             exit 0
           fi
 
-          # Handle push trigger (automatic)
           HEAD_SHA="${GITHUB_SHA}"
           BASE_SHA="${{ github.event.before }}"
 
@@ -113,18 +90,15 @@ jobs:
           echo "Changed .o files:"
           cat changed_o.txt
 
-          # Group files by module directory
           declare -A MODULE_FILES
           
           while IFS= read -r file; do
             [[ -z "${file}" ]] && continue
             dir="$(dirname "${file}")"
-            # Handle root-level files (dirname returns ".")
             if [[ "${dir}" == "." ]]; then
               dir=""
             fi
             
-            # Add file to module's array
             if [[ -z "${MODULE_FILES[$dir]:-}" ]]; then
               MODULE_FILES[$dir]="${file}"
             else
@@ -132,14 +106,12 @@ jobs:
             fi
           done < changed_o.txt
 
-          # Build JSON matrix
           MATRIX_ENTRIES=()
           
           for dir in $(printf '%s\n' "${!MODULE_FILES[@]}" | sort); do
-            # Convert newline-separated files to JSON array
             FILES_JSON=$(printf '%s\n' "${MODULE_FILES[$dir]}" | jq -R . | jq -s .)
             
-            ENTRY=$(jq -n \
+            ENTRY=$(jq -n -c \
               --arg dir "${dir}" \
               --argjson files "${FILES_JSON}" \
               '{module_dir: $dir, files: $files}')
@@ -147,27 +119,12 @@ jobs:
             MATRIX_ENTRIES+=("${ENTRY}")
           done
 
-          # Combine all entries into final matrix
-          if [[ ${#MATRIX_ENTRIES[@]} -eq 0 ]]; then
-            echo "Error: No matrix entries to combine" >&2
-            exit 1
-          fi
-          
           MATRIX=$(printf '%s\n' "${MATRIX_ENTRIES[@]}" | jq -s -c .)
-          
-          # Validate JSON before outputting
-          if ! echo "${MATRIX}" | jq empty >/dev/null 2>&1; then
-            echo "Error: Invalid JSON matrix generated" >&2
-            echo "Matrix content:" >&2
-            printf '%s\n' "${MATRIX_ENTRIES[@]}" >&2
-            exit 1
-          fi
           
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
           {
             echo "matrix<<EOF"
-            echo -n "${MATRIX}"
-            echo ""
+            echo "${MATRIX}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           echo "Built matrix:"
@@ -193,6 +150,8 @@ jobs:
       - name: Prepare module release
         id: prepare
         shell: bash
+        env:
+          FILES_JSON: ${{ toJson(matrix.module.files) }}
         run: |
           set -euo pipefail
 
@@ -200,18 +159,9 @@ jobs:
           HEAD_SHA="${GITHUB_SHA}"
           BASE_SHA="${{ github.event.before }}"
 
-          # Extract files array from matrix
-          FILES_JSON="${{ toJson(matrix.module.files) }}"
-          if ! echo "${FILES_JSON}" | jq empty >/dev/null 2>&1; then
-            echo "Error: Invalid files JSON from matrix" >&2
-            echo "Files JSON: ${FILES_JSON}" >&2
-            exit 1
-          fi
           echo "${FILES_JSON}" | jq -r '.[]' > module_files.txt
 
-          # Determine commit range for release notes
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # For manual releases, use current HEAD
             BASE_SHA="${HEAD_SHA}"
             COMMIT_RANGE="${HEAD_SHA:0:7}"
           else
@@ -223,7 +173,6 @@ jobs:
             fi
           fi
 
-          # Build file list with stats
           ASSETS=""
           FILE_COUNT=0
           
@@ -237,7 +186,6 @@ jobs:
             echo "Each asset includes a SHA256 in the table below so operators can verify downloads."
             echo ""
             
-            # Include README if present
             readme_path="${MODULE_DIR:+${MODULE_DIR}/}README.md"
             if [[ -f "${readme_path}" ]]; then
               echo "<details><summary><b>README.md</b> (click to expand)</summary>"
@@ -277,7 +225,6 @@ jobs:
             exit 1
           fi
 
-          # Prepare assets list
           {
             echo "files<<EOF"
             printf "%s" "${ASSETS}"
@@ -296,10 +243,8 @@ jobs:
           MODULE_DIR="${{ matrix.module.module_dir }}"
           HEAD_SHA="${GITHUB_SHA}"
           
-          # Sanitize module path for tag (replace / with -)
           SANITIZED_DIR="${MODULE_DIR//\//-}"
           
-          # Handle root-level modules
           if [[ -z "${SANITIZED_DIR}" ]]; then
             SANITIZED_DIR="root"
           fi
@@ -307,7 +252,6 @@ jobs:
           TS="$(date -u +"%Y-%m-%d-%H%M%S")"
           SHORT="${HEAD_SHA:0:7}"
           
-          # Use custom tag suffix if provided via workflow_dispatch
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.tag_suffix }}" ]]; then
             TAG="${SANITIZED_DIR}-${{ github.event.inputs.tag_suffix }}"
           else
