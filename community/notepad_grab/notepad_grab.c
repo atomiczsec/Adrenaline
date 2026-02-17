@@ -600,7 +600,20 @@ void go(char *args, unsigned long alen) {
 
         
         if (contentBuffer[0] != '\0') {
-            BeaconPrintf(CALLBACK_OUTPUT, "%s\n", contentBuffer);
+            int totalLen = KERNEL32$lstrlenA(contentBuffer);
+            int offset = 0;
+            while (offset < totalLen) {
+                int chunkLen = totalLen - offset;
+                if (chunkLen > MAX_OUTPUT_LENGTH) {
+                    chunkLen = MAX_OUTPUT_LENGTH;
+                }
+                char savedChar = contentBuffer[offset + chunkLen];
+                contentBuffer[offset + chunkLen] = '\0';
+                BeaconPrintf(CALLBACK_OUTPUT, "%s", &contentBuffer[offset]);
+                contentBuffer[offset + chunkLen] = savedChar;
+                offset += chunkLen;
+            }
+            BeaconPrintf(CALLBACK_OUTPUT, "\n");
         }
     }
 
