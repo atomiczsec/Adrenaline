@@ -12,7 +12,6 @@ CFLAGS := -c -Os
 CFLAGS += -fno-builtin -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-memmove
 CFLAGS += -fno-asynchronous-unwind-tables -fno-unwind-tables
 CFLAGS += -fno-stack-protector -fno-stack-check -mno-stack-arg-probe
-CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter
 

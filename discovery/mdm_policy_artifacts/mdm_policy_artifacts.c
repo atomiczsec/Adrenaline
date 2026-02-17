@@ -1404,7 +1404,6 @@ void go(char *args, unsigned long alen) {
     check_intune_evidence(&counters);
     enumerate_enterprisemgmt_tasks(&counters);
 
-    /
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\PolicyManager\\current\\device",

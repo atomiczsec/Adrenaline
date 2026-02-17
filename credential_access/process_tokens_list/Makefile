@@ -11,7 +11,7 @@ COMPILER_X86_AVAILABLE := $(shell command -v $(CC_X86) >/dev/null 2>&1 && echo y
 CFLAGS := -c -Os -std=c99 \
   -fno-stack-protector -fno-stack-check -mno-stack-arg-probe \
   -fno-builtin -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-memmove \
-  -ffunction-sections -fdata-sections -nostdlib \
+  -nostdlib \
   -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident \
   -Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
   -fno-leading-underscore -fno-ms-extensions

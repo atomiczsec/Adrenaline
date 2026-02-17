@@ -8,7 +8,7 @@ CC_X86  ?= i686-w64-mingw32-gcc
 # Optimized flags for BOF compilation (no CRT, minimal size)
 CFLAGS_COMMON := -c -Os \
   -fno-stack-protector -fno-stack-check -mno-stack-arg-probe \
-  -fno-builtin -ffunction-sections -fdata-sections -nostdlib \
+  -fno-builtin -nostdlib \
   -fno-asynchronous-unwind-tables -fno-ident \
   -Wall -Wextra -Wno-unused-parameter
 

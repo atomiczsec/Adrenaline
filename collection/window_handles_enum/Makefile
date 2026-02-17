@@ -7,7 +7,7 @@ STRIP_x64 := x86_64-w64-mingw32-strip
 CFLAGS := -c -Os -fno-builtin -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-memmove
 CFLAGS += -fno-asynchronous-unwind-tables -fno-unwind-tables
 CFLAGS += -fno-stack-protector -fno-stack-check -mno-stack-arg-probe
-CFLAGS += -nostdlib -ffunction-sections -fdata-sections
+CFLAGS += -nostdlib
 
 all: $(OBJS)
 
