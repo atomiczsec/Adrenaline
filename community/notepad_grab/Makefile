@@ -1,15 +1,15 @@
 override CC_X64 := x86_64-w64-mingw32-gcc
 STRIP_X64 ?= x86_64-w64-mingw32-strip
 
-
+# Force x64 always available, x86 always disabled (Linux CI)
 COMPILER_X64_AVAILABLE := yes
 COMPILER_X86_AVAILABLE := no
 
-
+# Standard BOF compilation flags (optimized, position-independent)
 CFLAGS := -Os -std=c99 \
 	-fno-stack-protector -fno-stack-check -mno-stack-arg-probe \
 	-fno-builtin -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-memmove \
-	-ffunction-sections -fdata-sections -nostdlib \
+	-nostdlib \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables -fno-ident \
 	-Wall -Wextra -Wno-unused-parameter -Wno-unused-variable \
 	-fno-leading-underscore -fno-ms-extensions
@@ -22,7 +22,7 @@ OBJS_X64 = $(patsubst %.c, %.x64.o, $(SRC))
 
 all: $(OBJS_X64)
 
-
+# Object files depend on source AND all headers
 %.x64.o: %.c $(HEADERS)
 	@echo "Building x64: $@"
 	$(CC_X64) $(CFLAGS) -c -o $@ $<
