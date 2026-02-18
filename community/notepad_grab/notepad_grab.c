@@ -71,7 +71,9 @@ DECLSPEC_IMPORT WINUSERAPI BOOL WINAPI USER32$EnumChildWindows(HWND hWndParent, 
 
 
 #define MAX_NOTEPAD_BUFFER 32768
-#define MAX_OUTPUT_LENGTH  32000  
+#ifndef BOF_CHUNK_SIZE
+#define BOF_CHUNK_SIZE 8192
+#endif
 #define MAX_NOTEPAD_INSTANCES 16  
 #define MAX_TITLE_FILTER 256      
 
@@ -604,8 +606,8 @@ void go(char *args, unsigned long alen) {
             int offset = 0;
             while (offset < totalLen) {
                 int chunkLen = totalLen - offset;
-                if (chunkLen > MAX_OUTPUT_LENGTH) {
-                    chunkLen = MAX_OUTPUT_LENGTH;
+                if (chunkLen > BOF_CHUNK_SIZE) {
+                    chunkLen = BOF_CHUNK_SIZE;
                 }
                 char savedChar = contentBuffer[offset + chunkLen];
                 contentBuffer[offset + chunkLen] = '\0';
