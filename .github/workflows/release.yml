@@ -180,22 +180,17 @@ jobs:
             echo "release_body<<EOF"
             echo "## Module: \`${MODULE_DIR}\`"
             echo ""
-            echo "**Commit Range:** \`${COMMIT_RANGE}\`"
-            echo ""
-            echo "### Integrity"
-            echo "Each asset includes a SHA256 in the table below so operators can verify downloads."
-            echo ""
-            
+
             readme_path="${MODULE_DIR:+${MODULE_DIR}/}README.md"
             if [[ -f "${readme_path}" ]]; then
-              echo "<details><summary><b>README.md</b> (click to expand)</summary>"
-              echo ""
-              head -n 200 "${readme_path}" || true
-              echo ""
-              echo "</details>"
+              cat "${readme_path}" || true
               echo ""
             fi
-            
+
+            echo "---"
+            echo ""
+            echo "<details><summary><b>Integrity</b> — SHA256 checksums for download verification</summary>"
+            echo ""
             echo "| File | Size (bytes) | SHA256 |"
             echo "|------|-------------:|--------|"
             
@@ -217,6 +212,8 @@ jobs:
             
             echo ""
             echo "**Total Files:** ${FILE_COUNT}"
+            echo ""
+            echo "</details>"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
