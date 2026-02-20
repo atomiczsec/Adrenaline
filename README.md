@@ -55,6 +55,7 @@
 | **[wevt_logon_enum](discovery/wevt_logon_enum/)**     | Enumerates recent Security log (successful/failed) logon events (Event IDs 4624,4625,4672) via the wevtapi API and prints remote workstation name/IP plus the target username. |
 | **[window_list](discovery/window_list/)**     | Enumerates the titles of all visible windows on the current user's desktop, optionally including Process IDs (PIDs).  |
 | **[wsc_status](discovery/wsc_status/)**           | Queries Windows Security Center health status, including Anti-Virus, Firewall, Anti-Spyware, WSC Service, Auto-Update, Internet Settings, and User Account Control.                                          |
+| **[win_version](discovery/win_version/)**           | This BOF queries the registry and system APIs to provide a concise but detailed overview of the Windows installation.  |
 
 ---
 
