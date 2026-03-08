@@ -49,6 +49,7 @@
 | **[com_probe](discovery/com_probe/)**           | Probe whether a COM object can be instantiated from a given CLSID. |
 | **[mdm_policy_artifacts](discovery/mdm_policy_artifacts/)**           | Uses a scoring model to assess MDM enrollment posture on Windows systems by evaluating indicators including join state, scheduled tasks, policy configuration, and enrollment artifacts. |
 | **[netjoin_query](discovery/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup. |
+| **[power_state](discovery/power_state/)**     | Identifies host form factor as Laptop, Desktop, Tablet, Server, Embedded, or Unknown using SMBIOS chassis data with a power-status fallback. |
 | **[user_idle](discovery/user_idle/)**            | Gets user idle time since last input and GUI resource usage (GDI/USER handles) in the current process for timing intelligence.                                         |
 | **[wallpaper_enum](discovery/wallpaper_enum/)**     | Enumerates the current desktop wallpaper path for each attached monitor using the modern IDesktopWallpaper COM interface. Centralized wallpapers are sometimes on internal SMB shares or imaging servers, revealing network paths, domain trusts, and policy enforcement without touching disk or the network. |
 | **[wef_detect](discovery/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
