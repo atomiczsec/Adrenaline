@@ -26,6 +26,7 @@ typedef struct {
 
 static void CheckRegistryProxy(void);
 static void CheckPolicyAndMachineProxy(void);
+static void CheckProxyMgrCache(void);
 static void CheckWinHttpProxy(void);
 static void CheckWinHttpBinarySettings(void);
 static void CheckEnvProxy(void);
@@ -45,6 +46,7 @@ DECLSPEC_IMPORT WINBASEAPI HANDLE WINAPI KERNEL32$FindFirstFileA(LPCSTR, LPWIN32
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$FindNextFileA(HANDLE, LPWIN32_FIND_DATAA);
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$FindClose(HANDLE);
 DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegOpenKeyExA(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
+DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegEnumKeyExA(HKEY, DWORD, LPSTR, LPDWORD, LPDWORD, LPSTR, LPDWORD, PFILETIME);
 DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegQueryValueExA(HKEY, LPCSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD);
 DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegCloseKey(HKEY);
 DECLSPEC_IMPORT BOOL WINAPI WINHTTP$WinHttpGetDefaultProxyConfiguration(WINHTTP_PROXY_INFO *);
@@ -513,6 +515,71 @@ static void CheckPolicyAndMachineProxy(void) {
     }
 }
 
+static void CheckProxyMgrCache(void) {
+    HKEY hRoot;
+    LONG result;
+    DWORD index = 0;
+    DWORD entries = 0;
+
+    BeaconPrintf(CALLBACK_OUTPUT, "[i] Querying Hidden ProxyMgr Cache...\n");
+
+    result = ADVAPI32$RegOpenKeyExA(
+        HKEY_LOCAL_MACHINE,
+        "SYSTEM\\CurrentControlSet\\Services\\iphlpsvc\\Parameters\\ProxyMgr",
+        0,
+        KEY_READ,
+        &hRoot
+    );
+    if (result == ERROR_FILE_NOT_FOUND) {
+        BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr cache key not present\n");
+        return;
+    }
+    if (result != ERROR_SUCCESS) {
+        BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr cache unavailable (error=%lu)\n", (unsigned long)result);
+        return;
+    }
+
+    while (index < 32) {
+        char subKeyName[80];
+        DWORD subKeyNameSize = sizeof(subKeyName);
+        HKEY hEntry;
+
+        result = ADVAPI32$RegEnumKeyExA(hRoot, index, subKeyName, &subKeyNameSize, NULL, NULL, NULL, NULL);
+        if (result == ERROR_NO_MORE_ITEMS) {
+            break;
+        }
+        if (result != ERROR_SUCCESS) {
+            BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr enumeration stopped (error=%lu)\n", (unsigned long)result);
+            break;
+        }
+
+        entries++;
+        if (ADVAPI32$RegOpenKeyExA(hRoot, subKeyName, 0, KEY_READ, &hEntry) == ERROR_SUCCESS) {
+            char staticProxy[BUF_SIZE_SMALL];
+
+            if (query_registry_string(hEntry, "StaticProxy", staticProxy, sizeof(staticProxy))) {
+                BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr %s StaticProxy: %s\n", subKeyName, staticProxy);
+            } else {
+                BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr %s present (no StaticProxy value)\n", subKeyName);
+            }
+
+            ADVAPI32$RegCloseKey(hEntry);
+        } else {
+            BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr %s present (subkey unreadable)\n", subKeyName);
+        }
+
+        index++;
+    }
+
+    if (entries == 0) {
+        BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr cache key present but contains no entries\n");
+    } else if (index == 32) {
+        BeaconPrintf(CALLBACK_OUTPUT, "  - ProxyMgr enumeration capped at 32 entries\n");
+    }
+
+    ADVAPI32$RegCloseKey(hRoot);
+}
+
 static void CheckWinHttpProxy(void) {
     WINHTTP_PROXY_INFO proxyInfo;
     inline_memset(&proxyInfo, 0, sizeof(proxyInfo));
@@ -921,6 +988,9 @@ void go(char *args, unsigned long alen) {
     BeaconPrintf(CALLBACK_OUTPUT, "\n");
 
     CheckPolicyAndMachineProxy();
+    BeaconPrintf(CALLBACK_OUTPUT, "\n");
+
+    CheckProxyMgrCache();
     BeaconPrintf(CALLBACK_OUTPUT, "\n");
 
     CheckWinHttpProxy();
