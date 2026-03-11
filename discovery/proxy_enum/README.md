@@ -36,6 +36,40 @@ When a proxy is configured, output can include:
 - Chrome enforced, recommended, or profile-level proxy settings
 - `.NET` `defaultProxy` attributes such as `enabled`, `usesystemdefault`, `proxyaddress`, `scriptlocation`, `bypassonlocal`, `autodetect`, and `bypasslist`
 
+Example:
+
+```text
+[i] Starting proxy enumeration...
+
+[i] Querying Registry (HKCU) / WinINET Proxy Settings...
+  - Proxy Enabled: Yes
+  - Proxy Server: http=proxy.corp.local:8080;https=proxy.corp.local:8080
+  - Proxy Bypass: <local>;*.corp.local
+  - PAC File (AutoConfigURL): http://wpad.corp.local/proxy.pac
+
+[i] Querying WinHTTP Default Proxy...
+  - Access Type: Named Proxy
+  - Proxy Server: proxy.corp.local:8080
+  - Proxy Bypass: <local>
+
+[i] Querying WPAD (Web Proxy Auto-Discovery) Configuration...
+  - AutoDetect: Enabled
+  - AutoConfigURL: http://wpad.corp.local/proxy.pac
+
+[i] Checking Chrome Proxy Configuration...
+  - HKLM Chrome Policy ProxyMode: fixed_servers
+  - HKLM Chrome Policy ProxyServer: proxy.corp.local:8080
+
+[i] Checking .NET Framework Proxy Configuration...
+  - .NET Framework v4.0.30319 machine.config defaultProxy section present
+    enabled=true
+    usesystemdefault=false
+    proxyaddress=http://proxy.corp.local:8080
+    bypassonlocal=true
+
+[+] Proxy enumeration complete
+```
+
 If little is configured, the BOF still reports direct-access states such as `Proxy Enabled: No`, `Access Type: Direct`, or `AutoDetect: Disabled`.
 
 ## Limitations
