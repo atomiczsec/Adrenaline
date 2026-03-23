@@ -47,7 +47,6 @@
 | **[applocker_policy](discovery/applocker_policy/)**     | Enumerates AppLocker policy configurations, rule collections, and enforcement modes by scanning the relevant registry keys.                                             |
 | **[asr_status](discovery/asr_status/)**           | Enumerates Windows Defender Attack Surface Reduction (ASR) rules from registry locations to identify which ASR rules are configured, their enforcement state (Block/Audit/Warn/Disabled), and the policy source (Intune/MDM vs Group Policy).                                          |
 | **[bitlocker_status](discovery/bitlocker_status/)**     | Enumerates BitLocker encryption status, policy configurations, and recovery key backup locations by scanning registry keys.                                             |
-| **[com_probe](discovery/com_probe/)**           | Probe whether a COM object can be instantiated from a given CLSID. |
 | **[mdm_policy_artifacts](discovery/mdm_policy_artifacts/)**           | Uses a scoring model to assess MDM enrollment posture on Windows systems by evaluating indicators including join state, scheduled tasks, policy configuration, and enrollment artifacts. |
 | **[netjoin_query](discovery/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup. |
 | **[power_state](discovery/power_state/)**     | Identifies host form factor as Laptop, Desktop, Tablet, Server, Embedded, or Unknown using SMBIOS chassis data with a power-status fallback. |
@@ -55,7 +54,6 @@
 | **[user_idle](discovery/user_idle/)**            | Gets user idle time since last input and GUI resource usage (GDI/USER handles) in the current process for timing intelligence.                                         |
 | **[wallpaper_enum](discovery/wallpaper_enum/)**     | Enumerates the current desktop wallpaper path for each attached monitor using the modern IDesktopWallpaper COM interface. Centralized wallpapers are sometimes on internal SMB shares or imaging servers, revealing network paths, domain trusts, and policy enforcement without touching disk or the network. |
 | **[wef_detect](discovery/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |
-| **[wevt_logon_enum](discovery/wevt_logon_enum/)**     | Enumerates recent Security log (successful/failed) logon events (Event IDs 4624,4625,4672) via the wevtapi API and prints remote workstation name/IP plus the target username. |
 | **[window_list](discovery/window_list/)**     | Enumerates the titles of all visible windows on the current user's desktop, optionally including Process IDs (PIDs).  |
 | **[wsc_status](discovery/wsc_status/)**           | Queries Windows Security Center health status, including Anti-Virus, Firewall, Anti-Spyware, WSC Service, Auto-Update, Internet Settings, and User Account Control.                                          |
 | **[win_version](discovery/win_version/)**           | This BOF queries the registry and system APIs to provide a concise but detailed overview of the Windows installation.  |
@@ -64,7 +62,9 @@
 
 | **BOF**                  | **Use**                                                                                                                                                         |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **[com_probe](execution/com_probe/)**           | Probe whether a COM object can be instantiated from a given CLSID. |
 | **[firewall_rule](execution/firewall_rule/)**     | Add, remove, or query Windows Firewall rules via the COM API (`INetFwPolicy2`) without spawning `netsh.exe` or `cmd.exe`. Useful for pivoting inside networks. |
+| **[wevt_logon_enum](execution/wevt_logon_enum/)**     | Enumerates recent Security log (successful/failed) logon events (Event IDs 4624,4625,4672) via the wevtapi API and prints remote workstation name/IP plus the target username. |
 
 ---
 
