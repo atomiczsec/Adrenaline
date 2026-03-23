@@ -10,7 +10,8 @@
 [Collection](#collection)  
 [Community](#community)  
 [Credential Access](#credential-access)  
-[Discovery](#discovery)
+[Discovery](#discovery)  
+[Execution](#execution)
 
 </div>
 
@@ -58,6 +59,12 @@
 | **[window_list](discovery/window_list/)**     | Enumerates the titles of all visible windows on the current user's desktop, optionally including Process IDs (PIDs).  |
 | **[wsc_status](discovery/wsc_status/)**           | Queries Windows Security Center health status, including Anti-Virus, Firewall, Anti-Spyware, WSC Service, Auto-Update, Internet Settings, and User Account Control.                                          |
 | **[win_version](discovery/win_version/)**           | This BOF queries the registry and system APIs to provide a concise but detailed overview of the Windows installation.  |
+
+## Execution
+
+| **BOF**                  | **Use**                                                                                                                                                         |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **[firewall_rule](execution/firewall_rule/)**     | Add, remove, or query Windows Firewall rules via the COM API (`INetFwPolicy2`) without spawning `netsh.exe` or `cmd.exe`. Useful for pivoting inside networks. |
 
 ---
 
