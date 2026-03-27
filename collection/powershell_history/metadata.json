@@ -1,0 +1,5 @@
+{
+  "name": "powershell_history",
+  "category": "collection",
+  "description": "Collects PowerShell command-history artifacts from PSReadLine and default transcript paths with bounded metadata and snippet output."
+}
