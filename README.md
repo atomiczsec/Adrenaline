@@ -19,7 +19,7 @@
 
 | **BOF**                  | **Use**                                                                                                                                                         |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **[ai_surface](collection/ai_surface/)**     | Maps which AI/Copilot tools are present on an endpoint and reports their key storage locations. Checks for Windows Copilot, Office Copilot, Edge Copilot, GitHub Copilot, and third-party AI tools (ChatGPT, Claude, Cursor IDE). |
+| **[ai_surface](collection/ai_surface/)**     | Maps AI tooling on Windows developer endpoints and enumerates high-value MCP configuration artifacts. Checks for Copilot and desktop AI traces, then previews Claude, Cursor, Windsurf, and project MCP configs that may expose local server commands, arguments, and embedded credentials. |
 | **[clipboard_grab](collection/clipboard_grab/)**       | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
 | **[powershell_history](collection/powershell_history/)** | Collects PowerShell history artifacts from default PSReadLine and transcript locations. Useful for locating credentials or infrastructure. |
 | **[window_handles_enum](collection/window_handles_enum/)**  | Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.                                                      |
@@ -81,4 +81,3 @@
 ---
 
 **DISCLAIMER:** The creators and contributors of this repository accept no liability for any loss, damage, or consequences resulting from the use of the information or code contained in this repo. By utilizing this repo, you acknowledge and accept full responsibility for your actions. Use at your own risk.
-

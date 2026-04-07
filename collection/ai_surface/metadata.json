@@ -1,6 +1,6 @@
 {
   "name": "ai_surface",
   "category": "collection",
-  "description": "Quick presence mapping of AI/Copilot tools and their key storage locations on an endpoint."
+  "description": "Maps AI tooling on Windows endpoints and enumerates MCP configuration artifacts, storage paths, and likely credential-bearing previews."
 }
 
