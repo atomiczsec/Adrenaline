@@ -52,9 +52,7 @@ Shared MCP-style project config:
 Windsurf:
 - `%USERPROFILE%\.codeium\windsurf\mcp_config.json`
 
-Additional Claude/Codex/Cursor/Gemini and agent-document paths in this list were derived from `preludeorg/cua-kit` `cua-enum` coverage:
-https://github.com/preludeorg/cua-kit/tree/main/cua-enum
-
+Some additional Claude/Codex/Cursor/Gemini and agent-document path checks in this module were added based on publicly documented path coverage in Prelude Research's [`cua-enum`](https://github.com/preludeorg/cua-kit/tree/main/cua-enum) project. This BOF uses an independent implementation in this repository.
 
 Project artifact discovery checks the root and direct children of common developer directories such as:
 
