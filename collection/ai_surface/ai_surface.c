@@ -84,14 +84,15 @@ typedef struct _PROCESS_INFORMATION {
 #include "beacon.h"
 
 #define MAX_PATH_LEN 520
-#define MAX_PROJECT_HITS 48
+#define MAX_PROJECT_HITS 16
 
 #define SECTION_WINDOWS_COPILOT "[i] Windows Copilot"
 #define SECTION_OFFICE_COPILOT  "[i] Office Copilot"
 #define SECTION_EDGE_COPILOT    "[i] Edge Copilot"
 #define SECTION_GH_COPILOT      "[i] GitHub Copilot"
 #define SECTION_THIRD_PARTY_AI  "[i] Third-party AI"
-#define SECTION_AI_ARTIFACTS    "[i] AI Configuration and Agent Artifact Discovery"
+#define SECTION_AI_AGENT_ARTIFACTS "[i] AI Agent Artifacts"
+#define SECTION_MCP_CONFIGS     "[i] MCP Configuration Discovery"
 
 #ifndef INVALID_HANDLE_VALUE
 #define INVALID_HANDLE_VALUE ((HANDLE)-1)
@@ -151,7 +152,7 @@ typedef struct {
 typedef WIN32_FIND_DATAW *LPWIN32_FIND_DATAW;
 
 typedef struct {
-    int artifacts_found;
+    int mcp_files_found;
     int project_hits;
 } scan_results_t;
 
@@ -327,6 +328,21 @@ static int path_exists(const wchar_t *path) {
     return (attr != INVALID_FILE_ATTRIBUTES);
 }
 
+static int expanded_path_exists(const wchar_t *pattern) {
+    wchar_t expanded[MAX_PATH_LEN];
+    DWORD needed;
+
+    if (!pattern) {
+        return 0;
+    }
+    inline_memset(expanded, 0, sizeof(expanded));
+    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, expanded, MAX_PATH_LEN);
+    if (needed == 0 || needed > MAX_PATH_LEN) {
+        return 0;
+    }
+    return path_exists(expanded);
+}
+
 static int is_directory(const wchar_t *path) {
     DWORD attr;
     if (!path) {
@@ -337,25 +353,6 @@ static int is_directory(const wchar_t *path) {
         return 0;
     }
     return ((attr & FILE_ATTRIBUTE_DIRECTORY) != 0);
-}
-
-static int expanded_path_exists(const wchar_t *pattern, int expect_directory, wchar_t *out_path, size_t out_size) {
-    DWORD needed;
-
-    if (!pattern || !out_path || out_size == 0) {
-        return 0;
-    }
-
-    inline_memset(out_path, 0, out_size * sizeof(wchar_t));
-    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, out_path, (DWORD)out_size);
-    if (needed == 0 || needed > out_size) {
-        return 0;
-    }
-
-    if (expect_directory) {
-        return is_directory(out_path);
-    }
-    return path_exists(out_path);
 }
 
 static void report_path_if_exists(const wchar_t *label, const wchar_t *path) {
@@ -526,7 +523,7 @@ static void print_claude_code_account_summary(const wchar_t *path) {
     KERNEL32$VirtualFree(buffer, 0, MEM_RELEASE);
 }
 
-static int report_artifact_hit(const wchar_t *label, const wchar_t *path, scan_results_t *results) {
+static int preview_config_file(const wchar_t *label, const wchar_t *path, scan_results_t *results) {
     if (!label || !path || !results) {
         return 0;
     }
@@ -534,7 +531,7 @@ static int report_artifact_hit(const wchar_t *label, const wchar_t *path, scan_r
         return 0;
     }
 
-    results->artifacts_found++;
+    results->mcp_files_found++;
     BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, path);
     if (wide_equals(label, L"Claude Code MCP Config")) {
         print_claude_code_account_summary(path);
@@ -542,74 +539,16 @@ static int report_artifact_hit(const wchar_t *label, const wchar_t *path, scan_r
     return 1;
 }
 
-static int report_directory_hit(const wchar_t *label, const wchar_t *path, scan_results_t *results) {
-    if (!label || !path || !results) {
-        return 0;
-    }
-    if (!is_directory(path)) {
-        return 0;
-    }
-
-    results->artifacts_found++;
-    BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, path);
-    return 1;
-}
-
-static int report_expanded_artifact(const wchar_t *label, const wchar_t *pattern, int expect_directory, scan_results_t *results) {
+static int preview_expanded_config(const wchar_t *label, const wchar_t *pattern, scan_results_t *results) {
     wchar_t path[MAX_PATH_LEN];
+    DWORD needed;
 
-    if (!expanded_path_exists(pattern, expect_directory, path, MAX_PATH_LEN)) {
+    inline_memset(path, 0, sizeof(path));
+    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, path, MAX_PATH_LEN);
+    if (needed == 0 || needed > MAX_PATH_LEN) {
         return 0;
     }
-    if (expect_directory) {
-        return report_directory_hit(label, path, results);
-    }
-    return report_artifact_hit(label, path, results);
-}
-
-static void scan_immediate_children_for_suffix(const wchar_t *root, const wchar_t *child_suffix, const wchar_t *label, int expect_directory, scan_results_t *results) {
-    wchar_t search[MAX_PATH_LEN];
-    wchar_t candidate[MAX_PATH_LEN];
-    WIN32_FIND_DATAW fd;
-    HANDLE hFind = INVALID_HANDLE_VALUE;
-
-    if (!root || !child_suffix || !label || !results || !is_directory(root)) {
-        return;
-    }
-
-    inline_memset(search, 0, sizeof(search));
-    inline_memset(candidate, 0, sizeof(candidate));
-    inline_memset(&fd, 0, sizeof(fd));
-
-    if (!build_path(root, L"\\*", search, MAX_PATH_LEN)) {
-        return;
-    }
-
-    hFind = KERNEL32$FindFirstFileW(search, &fd);
-    if (hFind == INVALID_HANDLE_VALUE) {
-        return;
-    }
-
-    do {
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || fd.cFileName[0] == L'.') {
-            continue;
-        }
-
-        inline_memset(candidate, 0, sizeof(candidate));
-        if (!build_path(root, L"\\", candidate, MAX_PATH_LEN) ||
-            !append_wide_in_place(candidate, fd.cFileName, MAX_PATH_LEN) ||
-            !append_wide_in_place(candidate, child_suffix, MAX_PATH_LEN)) {
-            continue;
-        }
-
-        if (expect_directory) {
-            report_directory_hit(label, candidate, results);
-        } else {
-            report_artifact_hit(label, candidate, results);
-        }
-    } while (KERNEL32$FindNextFileW(hFind, &fd));
-
-    KERNEL32$FindClose(hFind);
+    return preview_config_file(label, path, results);
 }
 
 static void check_taskbar_ai_setting(void) {
@@ -1004,6 +943,125 @@ static void check_third_party_ai(void) {
     }
 }
 
+static void check_ai_agent_artifacts(void) {
+    int codex_sessions = 0;
+    int codex_auth_config = 0;
+    int codex_history = 0;
+    int codex_logs = 0;
+    int codex_state_db = 0;
+    int codex_sandbox = 0;
+    int codex_memories_skills = 0;
+    int claude_sessions_projects = 0;
+    int claude_paste_cache = 0;
+    int claude_history = 0;
+    int claude_settings_credentials = 0;
+    int claude_plans_tasks_todos = 0;
+    int claude_shell_ide_debug = 0;
+    int codex_any = 0;
+    int claude_any = 0;
+    wchar_t codex_root[MAX_PATH_LEN];
+    wchar_t claude_root[MAX_PATH_LEN];
+    DWORD needed;
+
+    BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_AI_AGENT_ARTIFACTS ":\n");
+
+    codex_sessions =
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\sessions") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\archived_sessions");
+    codex_auth_config =
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\auth.json") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\config.toml") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\version.json") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\installation_id") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\cap_sid");
+    codex_history = expanded_path_exists(L"%USERPROFILE%\\.codex\\history.jsonl");
+    codex_logs =
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\log") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\sandbox.log") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\logs_2.sqlite") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\logs_2.sqlite-wal") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\logs_2.sqlite-shm");
+    codex_state_db =
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\state_5.sqlite") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\state_5.sqlite-wal") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\state_5.sqlite-shm") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\models_cache.json");
+    codex_sandbox =
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\.sandbox") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\.sandbox-bin") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\.sandbox-secrets") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\.tmp") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\tmp") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\cache");
+    codex_memories_skills =
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\memories") ||
+        expanded_path_exists(L"%USERPROFILE%\\.codex\\skills");
+
+    codex_any = codex_sessions || codex_auth_config || codex_history || codex_logs ||
+                codex_state_db || codex_sandbox || codex_memories_skills;
+
+    claude_sessions_projects =
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\sessions") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\projects") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\backups") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\plugins");
+    claude_paste_cache = expanded_path_exists(L"%USERPROFILE%\\.claude\\paste-cache");
+    claude_history = expanded_path_exists(L"%USERPROFILE%\\.claude\\history.jsonl");
+    claude_settings_credentials =
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\settings.json") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\.credentials.json") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\stats-cache.json");
+    claude_plans_tasks_todos =
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\plans") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\tasks") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\todos");
+    claude_shell_ide_debug =
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\shell-snapshots") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\ide") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\debug") ||
+        expanded_path_exists(L"%USERPROFILE%\\.claude\\file-history");
+
+    claude_any = claude_sessions_projects || claude_paste_cache || claude_history ||
+                 claude_settings_credentials || claude_plans_tasks_todos || claude_shell_ide_debug;
+
+    if (!codex_any && !claude_any) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
+        return;
+    }
+
+    inline_memset(codex_root, 0, sizeof(codex_root));
+    needed = KERNEL32$ExpandEnvironmentStringsW(L"%USERPROFILE%\\.codex", codex_root, MAX_PATH_LEN);
+    if (codex_any && needed > 0 && needed <= MAX_PATH_LEN) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] Codex profile: %S\n", codex_root);
+        if (codex_sessions) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   sessions\n"); }
+        if (codex_auth_config) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   auth/config\n"); }
+        if (codex_history) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   history\n"); }
+        if (codex_logs) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   logs\n"); }
+        if (codex_state_db) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   state db\n"); }
+        if (codex_sandbox) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   sandbox/cache/tmp\n"); }
+        if (codex_memories_skills) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   memories/skills\n"); }
+    }
+
+    inline_memset(claude_root, 0, sizeof(claude_root));
+    needed = KERNEL32$ExpandEnvironmentStringsW(L"%USERPROFILE%\\.claude", claude_root, MAX_PATH_LEN);
+    if (claude_any && needed > 0 && needed <= MAX_PATH_LEN) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] Claude Code profile: %S\n", claude_root);
+        if (claude_sessions_projects) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   sessions/projects\n"); }
+        if (claude_paste_cache) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   paste-cache\n"); }
+        if (claude_history) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   history\n"); }
+        if (claude_settings_credentials) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   settings/credentials\n"); }
+        if (claude_plans_tasks_todos) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   plans/tasks/todos\n"); }
+        if (claude_shell_ide_debug) { BeaconPrintf(CALLBACK_OUTPUT, "[i]   shell/IDE/debug\n"); }
+    }
+
+    BeaconPrintf(
+        CALLBACK_OUTPUT,
+        "[i] AI agent artifact summary: Codex=%s Claude Code=%s\n",
+        codex_any ? "yes" : "no",
+        claude_any ? "yes" : "no"
+    );
+}
+
 static void scan_vscode_mcp_extensions(const wchar_t *storage_root, const wchar_t *variant_name, scan_results_t *results) {
     wchar_t search[MAX_PATH_LEN];
     WIN32_FIND_DATAW fd;
@@ -1050,7 +1108,7 @@ static void scan_vscode_mcp_extensions(const wchar_t *storage_root, const wchar_
             any = 1;
         }
         BeaconPrintf(CALLBACK_OUTPUT, "[+] %S\\%S\n", storage_root, fd.cFileName);
-        results->artifacts_found++;
+        results->mcp_files_found++;
     } while (KERNEL32$FindNextFileW(hFind, &fd));
 
     KERNEL32$FindClose(hFind);
@@ -1068,7 +1126,7 @@ static void inspect_project_candidate(const wchar_t *project_path, scan_results_
 
     inline_memset(candidate, 0, sizeof(candidate));
     if (build_path(project_path, L"\\.mcp.json", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project .mcp.json", candidate, results)) {
+        preview_config_file(L"Project .mcp.json", candidate, results)) {
         results->project_hits++;
     }
 
@@ -1078,97 +1136,7 @@ static void inspect_project_candidate(const wchar_t *project_path, scan_results_
 
     inline_memset(candidate, 0, sizeof(candidate));
     if (build_path(project_path, L"\\.cursor\\rules\\mcp.json", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project Cursor MCP", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\.claude\\settings.json", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project Claude Settings", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\.claude\\settings.local.json", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project Claude Local Settings", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\CLAUDE.md", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project CLAUDE.md", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\AGENTS.md", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project AGENTS.md", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\AGENTS.override.md", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project AGENTS.override.md", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\.cursor\\rules", candidate, MAX_PATH_LEN) &&
-        report_directory_hit(L"Project Cursor Rules", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\.cursor\\environment.json", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project Cursor Environment", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\.cursorrules", candidate, MAX_PATH_LEN) &&
-        report_artifact_hit(L"Project .cursorrules", candidate, results)) {
-        results->project_hits++;
-    }
-
-    if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
-    }
-
-    inline_memset(candidate, 0, sizeof(candidate));
-    if (build_path(project_path, L"\\.gemini", candidate, MAX_PATH_LEN) &&
-        report_directory_hit(L"Project Gemini Directory", candidate, results)) {
+        preview_config_file(L"Project Cursor MCP", candidate, results)) {
         results->project_hits++;
     }
 }
@@ -1252,29 +1220,16 @@ static void check_mcp_configs(scan_results_t *results) {
         return;
     }
 
-    BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_AI_ARTIFACTS ":\n");
+    BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_MCP_CONFIGS ":\n");
 
-    report_expanded_artifact(L"Claude Desktop MCP Config", L"%APPDATA%\\Claude\\claude_desktop_config.json", 0, results);
-    report_expanded_artifact(L"Claude Code MCP Config", L"%USERPROFILE%\\.claude.json", 0, results);
-    report_expanded_artifact(L"Claude User Settings", L"%USERPROFILE%\\.claude\\settings.json", 0, results);
-    report_expanded_artifact(L"Claude User Agents Directory", L"%USERPROFILE%\\.claude\\agents", 1, results);
-    report_expanded_artifact(L"Cursor Global MCP Config", L"%USERPROFILE%\\.cursor\\mcp.json", 0, results);
-    report_expanded_artifact(L"Cursor Global State DB", L"%APPDATA%\\Cursor\\User\\globalStorage\\state.vscdb", 0, results);
-    report_expanded_artifact(L"Windsurf MCP Config", L"%USERPROFILE%\\.codeium\\windsurf\\mcp_config.json", 0, results);
-    report_expanded_artifact(L"Codex Config", L"%USERPROFILE%\\.codex\\config.toml", 0, results);
-    report_expanded_artifact(L"Codex AGENTS.md", L"%USERPROFILE%\\.codex\\AGENTS.md", 0, results);
-    report_expanded_artifact(L"Codex Skills Directory", L"%USERPROFILE%\\.codex\\skills", 1, results);
-    report_expanded_artifact(L"Codex Rules Directory", L"%USERPROFILE%\\.codex\\rules", 1, results);
-    report_expanded_artifact(L"Codex History Directory", L"%USERPROFILE%\\.codex\\history", 1, results);
-    report_expanded_artifact(L"Gemini User Directory", L"%USERPROFILE%\\.gemini", 1, results);
+    preview_expanded_config(L"Claude Desktop MCP Config", L"%APPDATA%\\Claude\\claude_desktop_config.json", results);
+    preview_expanded_config(L"Claude Code MCP Config", L"%USERPROFILE%\\.claude.json", results);
+    preview_expanded_config(L"Cursor Global MCP Config", L"%USERPROFILE%\\.cursor\\mcp.json", results);
+    preview_expanded_config(L"Windsurf MCP Config", L"%USERPROFILE%\\.codeium\\windsurf\\mcp_config.json", results);
 
     inline_memset(appData, 0, sizeof(appData));
     inline_memset(path, 0, sizeof(path));
     if (KERNEL32$GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH_LEN) > 0) {
-        if (build_path(appData, L"\\Cursor\\User\\globalStorage", path, MAX_PATH_LEN)) {
-            scan_immediate_children_for_suffix(path, L"\\state.vscdb", L"Cursor Extension State DB", 0, results);
-        }
-        inline_memset(path, 0, sizeof(path));
         if (build_path(appData, L"\\Code\\User\\globalStorage", path, MAX_PATH_LEN)) {
             scan_vscode_mcp_extensions(path, L"VS Code", results);
         }
@@ -1292,13 +1247,13 @@ static void check_mcp_configs(scan_results_t *results) {
         scan_project_root_pattern(project_roots[i], results);
     }
 
-    if (results->artifacts_found == 0) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[i] No AI config or agent artifacts discovered in default global or project roots\n");
+    if (results->mcp_files_found == 0) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i] No MCP configs discovered in default global or project roots\n");
     } else {
         BeaconPrintf(
             CALLBACK_OUTPUT,
-            "[i] Artifact summary: %d hits\n",
-            results->artifacts_found
+            "[i] MCP summary: %d artifacts\n",
+            results->mcp_files_found
         );
     }
 }
@@ -1317,5 +1272,6 @@ void go(char *args, unsigned long alen) {
     check_edge_copilot();
     check_github_copilot();
     check_third_party_ai();
+    check_ai_agent_artifacts();
     check_mcp_configs(&results);
 }

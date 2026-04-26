@@ -1,6 +1,6 @@
 {
   "name": "ai_surface",
   "category": "collection",
-  "description": "Maps AI tooling on Windows endpoints and enumerates MCP configuration artifacts, storage paths, and likely credential-bearing previews."
+  "description": "Maps AI tooling on Windows endpoints and adds triage-first Codex/Claude agent artifact discovery plus MCP configuration artifact previews."
 }
 
