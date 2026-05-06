@@ -1,7 +1,7 @@
 # Adrenaline BOF Kit
 <img src="https://github.com/atomiczsec/Adrenaline/blob/main/Assets/ADRENALINE.jpg" width="100%">
 
-*This repository contains BOFs (Beacon Object Files) designed for various red team and offensive security engagements. The end goal is to have a toolkit of BOFs that we can run interchangeably when looking to orchestrate large scale recon or actions.*
+*A C2-agnostic collection of Beacon Object Files (BOFs) for red team and offensive security operations. BOFs are organized by attack chain phase and designed to be small, modular, and automation-friendly for use in reconnaissance, enumeration, and post-exploitation workflows.*
 
 <div align='center'>
 
