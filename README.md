@@ -66,6 +66,7 @@
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **[com_probe](execution/com_probe/)**           | Probe whether a COM object can be instantiated from a given CLSID. |
 | **[firewall_rule](execution/firewall_rule/)**     | Add, remove, or query Windows Firewall rules via the COM API (`INetFwPolicy2`) without spawning `netsh.exe` or `cmd.exe`. Useful for pivoting inside networks. |
+| **[service_control](execution/service_control/)**     | Manages local Windows services via SCM: query (capped list or single service), create, start, stop, delete, and configure failure actions. Elevated rights usually required for changes. |
 | **[wevt_logon_enum](execution/wevt_logon_enum/)**     | Enumerates recent Security log (successful/failed) logon events (Event IDs 4624,4625,4672) via the wevtapi API and prints remote workstation name/IP plus the target username. |
 
 ---
