@@ -38,6 +38,7 @@
 | **BOF**                  | **Use**                                                                                                                                                         |
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **[certstore_loot](credential_access/certstore_loot/)**       | Enumerates local certificate stores to find certificates with exportable private keys and provides you with the path to export them. |
+| **[cloud_metadata_check](credential_access/cloud_metadata_check/)**       | Probes cloud-local metadata services for AWS, Azure, and GCP from the current process, reporting provider identity, instance context, and bounded credential snippets when reachable. |
 | **[process_tokens_list](credential_access/process_tokens_list/)**       | Enumerates accessible tokens from running processes, showing user context, token type (primary/impersonation), and impersonation level. Supports optional filtering by PID or process name. SeDebugPrivilege is disabled by default for OPSEC. |
 
 ## Discovery
