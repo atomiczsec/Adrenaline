@@ -183,31 +183,37 @@ static int resolve_wevtapi_functions(EvtApis *apis) {
         hMod = KERNEL32$LoadLibraryW(L"wevtapi.dll");
     }
     if (!hMod) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Could not load wevtapi.dll\n");
         return 0;
     }
     
     apis->EvtQuery = (pfnEvtQuery)(void*)KERNEL32$GetProcAddress(hMod, "EvtQuery");
     if (!apis->EvtQuery) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Could not resolve EvtQuery\n");
         return 0;
     }
 
     apis->EvtNext = (pfnEvtNext)(void*)KERNEL32$GetProcAddress(hMod, "EvtNext");
     if (!apis->EvtNext) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Could not resolve EvtNext\n");
         return 0;
     }
 
     apis->EvtRender = (pfnEvtRender)(void*)KERNEL32$GetProcAddress(hMod, "EvtRender");
     if (!apis->EvtRender) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Could not resolve EvtRender\n");
         return 0;
     }
 
     apis->EvtClose = (pfnEvtClose)(void*)KERNEL32$GetProcAddress(hMod, "EvtClose");
     if (!apis->EvtClose) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Could not resolve EvtClose\n");
         return 0;
     }
 
     apis->EvtCreateRenderContext = (pfnEvtCreateRenderContext)(void*)KERNEL32$GetProcAddress(hMod, "EvtCreateRenderContext");
     if (!apis->EvtCreateRenderContext) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Could not resolve EvtCreateRenderContext\n");
         return 0;
     }
 

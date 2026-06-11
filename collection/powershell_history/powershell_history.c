@@ -116,6 +116,7 @@ DECLSPEC_IMPORT BOOL WINAPI KERNEL32$ReadFile(HANDLE hFile, LPVOID lpBuffer, DWO
 DECLSPEC_IMPORT BOOL WINAPI KERNEL32$CloseHandle(HANDLE hObject);
 DECLSPEC_IMPORT LPVOID WINAPI KERNEL32$VirtualAlloc(LPVOID lpAddress, size_t dwSize, DWORD flAllocationType, DWORD flProtect);
 DECLSPEC_IMPORT BOOL WINAPI KERNEL32$VirtualFree(LPVOID lpAddress, size_t dwSize, DWORD dwFreeType);
+DECLSPEC_IMPORT DWORD WINAPI KERNEL32$GetLastError(void);
 
 #define MEM_COMMIT     0x00001000
 #define MEM_RESERVE    0x00002000
@@ -274,15 +275,18 @@ static int read_snippet_ascii_at(LPCWSTR path, unsigned long long start_offset, 
     out[0] = '\0';
     h = KERNEL32$CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[!]   Could not open file (error %lu)\n", (unsigned long)KERNEL32$GetLastError());
         return 0;
     }
     offset_high = (LONG)(start_offset >> 32);
     offset_low = (DWORD)(start_offset & 0xFFFFFFFF);
     if (start_offset != 0 && KERNEL32$SetFilePointer(h, (LONG)offset_low, &offset_high, FILE_BEGIN) == INVALID_SET_FILE_POINTER && offset_high == -1) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[!]   Seek failed (error %lu)\n", (unsigned long)KERNEL32$GetLastError());
         KERNEL32$CloseHandle(h);
         return 0;
     }
     if (!KERNEL32$ReadFile(h, out, out_size - 1, &bytes_read, NULL)) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[!]   Read failed (error %lu)\n", (unsigned long)KERNEL32$GetLastError());
         KERNEL32$CloseHandle(h);
         return 0;
     }

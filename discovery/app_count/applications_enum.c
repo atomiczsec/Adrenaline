@@ -38,7 +38,6 @@ void go(char *args, unsigned long alen) {
 
     if (lStatus != ERROR_SUCCESS) {
         BeaconPrintf(CALLBACK_ERROR, "Failed to open registry key: HKLM\\%s. Error code: %ld", lpSubKey, lStatus);
-        ADVAPI32$RegCloseKey(hKey);
         return;
     }
 

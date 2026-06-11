@@ -154,6 +154,7 @@ BOOL EnableSeDebugPrivilege() {
     inline_memset(&tkp, 0, sizeof(tkp));
 
     if (!ADVAPI32$OpenProcessToken(KERNEL32$GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] OpenProcessToken failed (error %lu)\n", KERNEL32$GetLastError());
         return FALSE;
     }
 
@@ -164,6 +165,8 @@ BOOL EnableSeDebugPrivilege() {
         if (ok && KERNEL32$GetLastError() == ERROR_NOT_ALL_ASSIGNED) {
             ok = FALSE;
         }
+    } else {
+        BeaconPrintf(CALLBACK_ERROR, "[-] LookupPrivilegeValue failed (error %lu)\n", KERNEL32$GetLastError());
     }
 
     KERNEL32$CloseHandle(hToken);
