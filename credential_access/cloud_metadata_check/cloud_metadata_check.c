@@ -666,27 +666,17 @@ static void build_appservice_token_path(wchar_t *dst, size_t dst_max,
                                         const wchar_t *base_path,
                                         const char *api_version,
                                         const char *resource) {
+    const char *res;
     if (!dst || dst_max == 0) return;
+    res = (resource && resource[0]) ? resource : "https://management.azure.com/";
     wstr_copy(dst, dst_max, base_path && base_path[0] ? base_path : L"/");
     if (wstr_has_char(dst, L'?')) {
-        wstr_append_ascii(dst, dst_max, "&resource=https://management.azure.com/&api-version=");
+        wstr_append_ascii(dst, dst_max, "&resource=");
     } else {
-        wstr_append_ascii(dst, dst_max, "?resource=https://management.azure.com/&api-version=");
+        wstr_append_ascii(dst, dst_max, "?resource=");
     }
-    if (resource && resource[0]) {
-        const wchar_t *marker = wstr_find_i(dst, L"resource=https://management.azure.com/");
-        if (marker) {
-            dst[0] = 0;
-            wstr_copy(dst, dst_max, base_path && base_path[0] ? base_path : L"/");
-            if (wstr_has_char(dst, L'?')) {
-                wstr_append_ascii(dst, dst_max, "&resource=");
-            } else {
-                wstr_append_ascii(dst, dst_max, "?resource=");
-            }
-            wstr_append_ascii(dst, dst_max, resource);
-            wstr_append_ascii(dst, dst_max, "&api-version=");
-        }
-    }
+    wstr_append_ascii(dst, dst_max, res);
+    wstr_append_ascii(dst, dst_max, "&api-version=");
     wstr_append_ascii(dst, dst_max, api_version);
 }
 
@@ -962,16 +952,18 @@ static int json_field_value_snip(const char *body, const char *key,
 }
 
 static void build_aws_cred_path(wchar_t *path, size_t path_max, const char *role) {
+    size_t pos;
     size_t i;
     if (!path || path_max < 8 || !role) return;
     wstr_copy(path, path_max, L"/latest/meta-data/iam/security-credentials/");
+    pos = wstr_len(path);
     i = 0;
-    while (role[i] && wstr_len(path) < path_max - 1) {
-        size_t pos = wstr_len(path);
+    while (role[i] && pos < path_max - 1) {
         path[pos] = (wchar_t)(unsigned char)role[i];
-        path[pos + 1] = 0;
+        pos++;
         i++;
     }
+    path[pos] = 0;
 }
 
 static int probe_tcp_port(const char *ip, u_short port) {
@@ -979,6 +971,7 @@ static int probe_tcp_port(const char *ip, u_short port) {
     SOCKET sock = INVALID_SOCKET;
     SOCKADDR_IN_BOF addr;
     FD_SET_BOF wfds;
+    FD_SET_BOF efds;
     TIMEVAL_BOF tv;
     u_long nb_mode = 1;
     int sock_err = 0;
@@ -1015,9 +1008,11 @@ static int probe_tcp_port(const char *ip, u_short port) {
     } else if (wsa_err == WSAEWOULDBLOCK) {
         FD_ZERO_BOF(&wfds);
         FD_SET1_BOF(sock, &wfds);
+        FD_ZERO_BOF(&efds);
+        FD_SET1_BOF(sock, &efds);
         tv.tv_sec = 1;
         tv.tv_usec = 0;
-        if (WS2_32$select(0, NULL, &wfds, NULL, &tv) > 0) {
+        if (WS2_32$select(0, NULL, &wfds, &efds, &tv) > 0) {
             if (WS2_32$getsockopt(sock, SOL_SOCKET, SO_ERROR,
                                   (char *)&sock_err, &sock_err_len) == 0
                 && sock_err == 0) {
