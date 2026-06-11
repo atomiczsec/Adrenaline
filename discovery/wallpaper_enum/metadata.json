@@ -1,5 +1,5 @@
 {
   "projectName": "wallpaper_enum",
   "category": "recon",
-  "summary": "Enumerates per-monitor desktop wallpaper paths via the IDesktopWallpaper COM API to reveal centrally hosted images or network shares.",
+  "summary": "Enumerates per-monitor desktop wallpaper paths via the IDesktopWallpaper COM API to reveal centrally hosted images or network shares."
 }
