@@ -338,6 +338,7 @@ static int FindNotepadProcesses(DWORD *pids, int maxPids) {
     
     snapshot = KERNEL32$CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE || snapshot == NULL) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] Failed to create process snapshot\n");
         return 0;
     }
     

@@ -148,7 +148,11 @@ BOOL TestClipboardAccess(HWND hwnd, formatp* format) {
                 BeaconFormatPrintf(format, "[+] Clipboard contents: %s%s\n", 
                     truncatedText, my_strlen(pClipText) > 100 ? "..." : "");
                 KERNEL32$GlobalUnlock(hClipData);
+            } else {
+                BeaconFormatPrintf(format, "[-] Failed to lock clipboard data\n");
             }
+        } else {
+            BeaconFormatPrintf(format, "[-] Failed to retrieve clipboard data\n");
         }
     } else {
         BeaconFormatPrintf(format, "[*] No text data available in clipboard\n");
