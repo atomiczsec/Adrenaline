@@ -404,7 +404,7 @@ static int read_file_text_bounded(LPCWSTR path, DWORD max_bytes, char **out_buf,
     }
 
     fileSize = KERNEL32$GetFileSize(hFile, NULL);
-    if (fileSize == INVALID_FILE_ATTRIBUTES) {
+    if (fileSize == (DWORD)0xFFFFFFFF) {
         KERNEL32$CloseHandle(hFile);
         return 0;
     }

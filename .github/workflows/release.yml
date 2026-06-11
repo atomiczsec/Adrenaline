@@ -21,6 +21,8 @@ on:
 jobs:
   detect:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.build_matrix.outputs.matrix }}
       has_changes: ${{ steps.build_matrix.outputs.has_changes }}
@@ -33,11 +35,13 @@ jobs:
       - name: Build module matrix
         id: build_matrix
         shell: bash
+        env:
+          INPUT_MODULE_PATH: ${{ github.event.inputs.module_path }}
         run: |
           set -euo pipefail
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            MODULE_PATH="${{ github.event.inputs.module_path }}"
+            MODULE_PATH="${INPUT_MODULE_PATH}"
             
             if [[ ! -d "${MODULE_PATH}" ]]; then
               echo "Error: Module path '${MODULE_PATH}' does not exist" >&2
@@ -234,6 +238,8 @@ jobs:
       - name: Create release tag
         id: tag
         shell: bash
+        env:
+          INPUT_TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
         run: |
           set -euo pipefail
 
@@ -249,8 +255,8 @@ jobs:
           TS="$(date -u +"%Y-%m-%d-%H%M%S")"
           SHORT="${HEAD_SHA:0:7}"
           
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ github.event.inputs.tag_suffix }}" ]]; then
-            TAG="${SANITIZED_DIR}-${{ github.event.inputs.tag_suffix }}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${INPUT_TAG_SUFFIX}" ]]; then
+            TAG="${SANITIZED_DIR}-${INPUT_TAG_SUFFIX}"
           else
             TAG="${SANITIZED_DIR}-${TS}-${SHORT}"
           fi
@@ -259,7 +265,7 @@ jobs:
           echo "Created tag: ${TAG}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: Release ${{ steps.tag.outputs.tag }}
