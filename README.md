@@ -21,6 +21,7 @@
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **[ai_surface](collection/ai_surface/)**     | Maps AI tooling on Windows developer endpoints and highlights their configuration artifacts that may expose server definitions, commands, arguments, and embedded credentials. |
 | **[clipboard_grab](collection/clipboard_grab/)**       | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
+| **[ide_extension_surface](collection/ide_extension_surface/)** | Enumerates VS Code, Cursor, Windsurf, Insiders, OSS, and server/remote extension manifests from per-user profile roots and summarizes extension identity, activation events, and capability signals. |
 | **[powershell_history](collection/powershell_history/)** | Collects PowerShell history artifacts from default PSReadLine and transcript locations. Useful for locating credentials or infrastructure. |
 | **[window_handles_enum](collection/window_handles_enum/)**  | Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.                                                      |
 
@@ -54,6 +55,7 @@
 | **[netjoin_query](discovery/netjoin_query/)**     | Queries Windows domain join information and workstation details, identifying if the system is domain-joined or in a workgroup. |
 | **[power_state](discovery/power_state/)**     | Identifies host form factor as Laptop, Desktop, Tablet, Server, Embedded, or Unknown using SMBIOS chassis data with a power-status fallback. |
 | **[proxy_enum](discovery/proxy_enum/)**     | Enumerates Windows proxy configuration state across WinINET, WinHTTP, policy keys, environment variables, WPAD indicators, Chrome settings, and .NET `defaultProxy` values. |
+| **[tray_scout](discovery/tray_scout/)**     | Reports the taskbar host executable and enumerates system tray notification icon tooltips, with optional full image paths for the host and each icon's owning process. |
 | **[user_idle](discovery/user_idle/)**            | Gets user idle time since last input and GUI resource usage (GDI/USER handles) in the current process for timing intelligence.                                         |
 | **[wallpaper_enum](discovery/wallpaper_enum/)**     | Enumerates the current desktop wallpaper path for each attached monitor using the modern IDesktopWallpaper COM interface. Centralized wallpapers are sometimes on internal SMB shares or imaging servers, revealing network paths, domain trusts, and policy enforcement without touching disk or the network. |
 | **[wef_detect](discovery/wef_detect/)**           | Detects Windows Event Forwarding (WEF) configuration, which indicates centralized logging. If found, indicates security events are being forwarded to a central server. |

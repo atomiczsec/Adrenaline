@@ -1,0 +1,7 @@
+{
+  "projectName": "tray_scout",
+  "category": "discovery",
+  "summary": "Enumerates the Shell_TrayWnd host executable and system tray (notification area) icon tooltips, with optional full image paths for the taskbar host and each tray icon owner process.",
+  "redTeamContext": "Tray icons reveal running security agents, VPN clients, collaboration tools, and other software without process listing. Resolving host and per-icon image paths helps operators map EDR stacks and user workflows from the interactive desktop session.",
+  "generatedAt": "2026-03-29T00:00:00.000Z"
+}

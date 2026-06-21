@@ -1,0 +1,5 @@
+{
+  "name": "ide_extension_surface",
+  "category": "collection",
+  "description": "Enumerates VS Code, Cursor, Windsurf, Insiders, OSS, and server/remote extension manifests from per-user profile roots and summarizes extension identity, activation events, and capability signals."
+}
