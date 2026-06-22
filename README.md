@@ -21,7 +21,7 @@
 |--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **[ai_surface](collection/ai_surface/)**     | Maps AI tooling on Windows developer endpoints and highlights their configuration artifacts that may expose server definitions, commands, arguments, and embedded credentials. |
 | **[clipboard_grab](collection/clipboard_grab/)**       | Retrieves text data from the Windows clipboard using Win32 APIs and returns the contents to the callback.  Original Code Credits: [@rvrsh3ll](https://github.com/rvrsh3ll/BOF_Collection) |
-| **[ide_extension_surface](collection/ide_extension_surface/)** | Enumerates VS Code, Cursor, Windsurf, Insiders, OSS, and server/remote extension manifests from per-user profile roots and summarizes extension identity, activation events, and capability signals. |
+| **[ide_extension_surface](collection/ide_extension_surface/)** | Enumerates VS Code, Cursor, Windsurf, Zed, Insiders, OSS, and server/remote extension manifests from per-user profile roots and summarizes extension identity, activation events, and capability signals. |
 | **[powershell_history](collection/powershell_history/)** | Collects PowerShell history artifacts from default PSReadLine and transcript locations. Useful for locating credentials or infrastructure. |
 | **[window_handles_enum](collection/window_handles_enum/)**  | Enumerates window handles across all system processes and uses a legitimate window handle to access the clipboard.                                                      |
 

@@ -639,6 +639,78 @@ static void summarize_capabilities(const char *json, char *out, size_t out_size)
     }
 }
 
+static int extract_toml_string_value(const char *toml, const char *key, char *out, size_t out_size) {
+    char pattern[FIELD_SMALL];
+    const char *match;
+    char quote;
+    size_t i = 0;
+
+    if (!toml || !key || !out || out_size == 0) {
+        return 0;
+    }
+
+    inline_memset(pattern, 0, sizeof(pattern));
+    if (!append_ascii_fragment(pattern, sizeof(pattern), key) ||
+        !append_ascii_fragment(pattern, sizeof(pattern), " = \"")) {
+        out[0] = '\0';
+        return 0;
+    }
+
+    match = ascii_find(toml, pattern);
+    if (!match) {
+        inline_memset(pattern, 0, sizeof(pattern));
+        if (!append_ascii_fragment(pattern, sizeof(pattern), key) ||
+            !append_ascii_fragment(pattern, sizeof(pattern), " = '")) {
+            out[0] = '\0';
+            return 0;
+        }
+        match = ascii_find(toml, pattern);
+        if (!match) {
+            out[0] = '\0';
+            return 0;
+        }
+        quote = '\'';
+    } else {
+        quote = '"';
+    }
+
+    match += inline_strlen(pattern);
+    while (*match && i + 1 < out_size) {
+        if (*match == quote) {
+            break;
+        }
+        out[i++] = *match++;
+    }
+    out[i] = '\0';
+    return i > 0;
+}
+
+static void summarize_zed_capabilities(const char *toml, char *out, size_t out_size) {
+    if (!toml || !out || out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    if (ascii_find(toml, "languages/") || ascii_find(toml, "[languages]")) {
+        append_capability_label(out, out_size, "languages");
+    }
+    if (ascii_find(toml, "themes/") || ascii_find(toml, "[themes]")) {
+        append_capability_label(out, out_size, "themes");
+    }
+    if (ascii_find(toml, "snippets/") || ascii_find(toml, "[snippets]")) {
+        append_capability_label(out, out_size, "snippets");
+    }
+    if (ascii_find(toml, "[debuggers]") || ascii_find(toml, "debuggers/")) {
+        append_capability_label(out, out_size, "debuggers");
+    }
+    if (ascii_find(toml, "Cargo.toml") || ascii_find(toml, "src/lib.rs")) {
+        append_capability_label(out, out_size, "wasm");
+    }
+    if (ascii_contains_ci(toml, "mcp") || ascii_contains_ci(toml, "modelcontextprotocol")) {
+        append_capability_label(out, out_size, "mcp-adjacent");
+    }
+}
+
 static void build_extension_id(const char *publisher, const char *name, char *out, size_t out_size) {
     if (!out || out_size == 0) {
         return;
@@ -726,16 +798,64 @@ static void report_manifest(const wchar_t *editor_label, const wchar_t *resolved
     results->manifests_found++;
 }
 
-static void scan_extension_root(const wchar_t *editor_label, const wchar_t *pattern, scan_results_t *results) {
+static void report_zed_manifest(const wchar_t *editor_label, const wchar_t *resolved_root, const wchar_t *manifest_path, const char *toml, int was_truncated, scan_results_t *results) {
+    char display_name[FIELD_MEDIUM];
+    char version[FIELD_SMALL];
+    char extension_id[FIELD_MEDIUM];
+    char description[FIELD_LARGE];
+    char capabilities[FIELD_LARGE];
+
+    if (!editor_label || !resolved_root || !manifest_path || !toml || !results) {
+        return;
+    }
+
+    inline_memset(display_name, 0, sizeof(display_name));
+    inline_memset(version, 0, sizeof(version));
+    inline_memset(extension_id, 0, sizeof(extension_id));
+    inline_memset(description, 0, sizeof(description));
+    inline_memset(capabilities, 0, sizeof(capabilities));
+
+    extract_toml_string_value(toml, "id", extension_id, sizeof(extension_id));
+    extract_toml_string_value(toml, "name", display_name, sizeof(display_name));
+    extract_toml_string_value(toml, "version", version, sizeof(version));
+    extract_toml_string_value(toml, "description", description, sizeof(description));
+    summarize_zed_capabilities(toml, capabilities, sizeof(capabilities));
+
+    print_root_header_if_needed(results, editor_label, resolved_root);
+    BeaconPrintf(CALLBACK_OUTPUT, "[+] Manifest: %S\n", manifest_path);
+    if (extension_id[0] != '\0') {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   ID: %s\n", extension_id);
+    }
+    if (display_name[0] != '\0') {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Display Name: %s\n", display_name);
+    }
+    if (version[0] != '\0') {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Version: %s\n", version);
+    }
+    if (description[0] != '\0') {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Description: %s\n", description);
+    }
+    if (capabilities[0] != '\0') {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Capabilities: %s\n", capabilities);
+    }
+    if (was_truncated) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Note: extension.toml truncated at %d bytes\n", MAX_FILE_READ);
+    }
+
+    results->manifests_found++;
+}
+
+static void scan_extension_root(const wchar_t *editor_label, const wchar_t *pattern, const wchar_t *manifest_name, int is_toml, scan_results_t *results) {
     wchar_t root[MAX_PATH_LEN];
     wchar_t search[MAX_PATH_LEN];
     wchar_t child_dir[MAX_PATH_LEN];
+    wchar_t manifest_leaf[MAX_PATH_LEN];
     wchar_t manifest_path[MAX_PATH_LEN];
     WIN32_FIND_DATAW fd;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     DWORD needed;
 
-    if (!editor_label || !pattern || !results) {
+    if (!editor_label || !pattern || !manifest_name || !results) {
         return;
     }
 
@@ -769,10 +889,12 @@ static void scan_extension_root(const wchar_t *editor_label, const wchar_t *patt
         }
 
         inline_memset(child_dir, 0, sizeof(child_dir));
+        inline_memset(manifest_leaf, 0, sizeof(manifest_leaf));
         inline_memset(manifest_path, 0, sizeof(manifest_path));
         if (!build_path(root, L"\\", child_dir, MAX_PATH_LEN) ||
             !append_wide_in_place(child_dir, fd.cFileName, MAX_PATH_LEN) ||
-            !build_path(child_dir, L"\\package.json", manifest_path, MAX_PATH_LEN)) {
+            !build_path(L"\\", manifest_name, manifest_leaf, MAX_PATH_LEN) ||
+            !build_path(child_dir, manifest_leaf, manifest_path, MAX_PATH_LEN)) {
             continue;
         }
         if (!path_exists(manifest_path)) {
@@ -782,7 +904,11 @@ static void scan_extension_root(const wchar_t *editor_label, const wchar_t *patt
             continue;
         }
 
-        report_manifest(editor_label, root, manifest_path, buffer, was_truncated, results);
+        if (is_toml) {
+            report_zed_manifest(editor_label, root, manifest_path, buffer, was_truncated, results);
+        } else {
+            report_manifest(editor_label, root, manifest_path, buffer, was_truncated, results);
+        }
         KERNEL32$VirtualFree(buffer, 0, MEM_RELEASE);
     } while (KERNEL32$FindNextFileW(hFind, &fd));
 
@@ -798,15 +924,16 @@ void go(char *args, unsigned long alen) {
 
     BeaconPrintf(CALLBACK_OUTPUT, SECTION_IDE_EXTENSIONS ":\n");
 
-    scan_extension_root(L"VS Code", L"%USERPROFILE%\\.vscode\\extensions", &results);
-    scan_extension_root(L"VS Code Insiders", L"%USERPROFILE%\\.vscode-insiders\\extensions", &results);
-    scan_extension_root(L"VS Code OSS", L"%USERPROFILE%\\.vscode-oss\\extensions", &results);
-    scan_extension_root(L"Cursor", L"%USERPROFILE%\\.cursor\\extensions", &results);
-    scan_extension_root(L"Windsurf", L"%USERPROFILE%\\.windsurf\\extensions", &results);
-    scan_extension_root(L"Windsurf (Codeium root)", L"%USERPROFILE%\\.codeium\\windsurf\\extensions", &results);
-    scan_extension_root(L"VS Code Server", L"%USERPROFILE%\\.vscode-server\\extensions", &results);
-    scan_extension_root(L"Cursor Server", L"%USERPROFILE%\\.cursor-server\\extensions", &results);
-    scan_extension_root(L"VS Code Remote", L"%USERPROFILE%\\.vscode-remote\\extensions", &results);
+    scan_extension_root(L"VS Code", L"%USERPROFILE%\\.vscode\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"VS Code Insiders", L"%USERPROFILE%\\.vscode-insiders\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"VS Code OSS", L"%USERPROFILE%\\.vscode-oss\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"Cursor", L"%USERPROFILE%\\.cursor\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"Windsurf", L"%USERPROFILE%\\.windsurf\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"Windsurf (Codeium root)", L"%USERPROFILE%\\.codeium\\windsurf\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"Zed", L"%LOCALAPPDATA%\\Zed\\extensions\\installed", L"extension.toml", 1, &results);
+    scan_extension_root(L"VS Code Server", L"%USERPROFILE%\\.vscode-server\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"Cursor Server", L"%USERPROFILE%\\.cursor-server\\extensions", L"package.json", 0, &results);
+    scan_extension_root(L"VS Code Remote", L"%USERPROFILE%\\.vscode-remote\\extensions", L"package.json", 0, &results);
 
     if (results.manifests_found == 0) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");

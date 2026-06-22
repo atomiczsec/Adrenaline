@@ -2,7 +2,7 @@
 
 ## Summary
 
-Enumerates installed IDE extension manifests for VS Code, Cursor, Windsurf, Insiders, OSS, and server/remote profiles from per-user roots and summarizes extension identity, activation events, and capability signals.
+Enumerates installed IDE extension manifests for VS Code, Cursor, Windsurf, Zed, Insiders, OSS, and server/remote profiles from per-user roots and summarizes extension identity, activation events, and capability signals.
 
 Supported roots:
 
@@ -12,6 +12,7 @@ Supported roots:
 - `%USERPROFILE%\.cursor\extensions`
 - `%USERPROFILE%\.windsurf\extensions`
 - `%USERPROFILE%\.codeium\windsurf\extensions`
+- `%LOCALAPPDATA%\Zed\extensions\installed`
 - `%USERPROFILE%\.vscode-server\extensions`
 - `%USERPROFILE%\.cursor-server\extensions`
 - `%USERPROFILE%\.vscode-remote\extensions`
