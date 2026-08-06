@@ -143,11 +143,25 @@ typedef struct _PROCESS_INFORMATION {
 #define PAGE_READWRITE 0x04
 #endif
 
+#ifndef FILETIME_DEFINED
+#define FILETIME_DEFINED
+typedef struct {
+    unsigned long dwLowDateTime;
+    unsigned long dwHighDateTime;
+} FILETIME;
+#endif
+
 typedef struct {
     DWORD dwFileAttributes;
+    FILETIME ftCreationTime;
+    FILETIME ftLastAccessTime;
+    FILETIME ftLastWriteTime;
     unsigned long nFileSizeHigh;
     unsigned long nFileSizeLow;
+    DWORD dwReserved0;
+    DWORD dwReserved1;
     wchar_t cFileName[260];
+    wchar_t cAlternateFileName[14];
 } WIN32_FIND_DATAW;
 typedef WIN32_FIND_DATAW *LPWIN32_FIND_DATAW;
 

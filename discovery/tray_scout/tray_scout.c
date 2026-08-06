@@ -45,6 +45,10 @@ DECLSPEC_IMPORT WINBASEAPI LPVOID WINAPI KERNEL32$VirtualAllocEx(
     DWORD flProtect);
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$VirtualFreeEx(
     HANDLE hProcess, LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
+DECLSPEC_IMPORT WINBASEAPI LPVOID WINAPI KERNEL32$VirtualAlloc(
+    LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$VirtualFree(
+    LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$ReadProcessMemory(
     HANDLE hProcess, LPCVOID lpBaseAddress, LPVOID lpBuffer, SIZE_T nSize,
     SIZE_T *lpNumberOfBytesRead);
@@ -542,7 +546,7 @@ static int enum_tray_registry(int verbose, int *items_out) {
   WCHAR subname[64];
   WCHAR exe_path[TRAY_REG_PATH_CCH];
   WCHAR tooltip[128];
-  WCHAR seen[TRAY_REG_DEDUP][TRAY_REG_BASE_CCH];
+  WCHAR (*seen)[TRAY_REG_BASE_CCH] = NULL;
   int seen_count = 0;
   int items = 0;
 
@@ -553,6 +557,16 @@ static int enum_tray_registry(int verbose, int *items_out) {
   if (ADVAPI32$RegOpenKeyExW(HKEY_CURRENT_USER,
                              L"Control Panel\\NotifyIconSettings", 0, KEY_READ,
                              &hRoot) != ERROR_SUCCESS) {
+    return 0;
+  }
+
+  seen = (WCHAR (*)[TRAY_REG_BASE_CCH])KERNEL32$VirtualAlloc(
+      NULL, sizeof(*seen) * TRAY_REG_DEDUP, MEM_COMMIT | MEM_RESERVE,
+      PAGE_READWRITE);
+  if (seen == NULL) {
+    BeaconPrintf(CALLBACK_OUTPUT,
+                 "[-] NotifyIconSettings: VirtualAlloc failed\n");
+    ADVAPI32$RegCloseKey(hRoot);
     return 0;
   }
 
@@ -602,6 +616,7 @@ static int enum_tray_registry(int verbose, int *items_out) {
   }
 
   ADVAPI32$RegCloseKey(hRoot);
+  KERNEL32$VirtualFree(seen, 0, MEM_RELEASE);
   if (items_out != NULL) {
     *items_out = items;
   }
