@@ -1,149 +1,22 @@
-name: Auto Release on .o File Changes
+name: Publish Adrenaline BOF Bundle
 
 on:
   push:
     branches: [main]
     paths:
       - "**/*.o"
-      - "**/*.x64.o"
-      - "**/*.x86.o"
+      - ".github/workflows/release.yml"
   workflow_dispatch:
-    inputs:
-      module_path:
-        description: 'Module path to release (e.g., env_assessment/com_probe)'
-        required: true
-        type: string
-      tag_suffix:
-        description: 'Optional tag suffix (defaults to timestamp-SHA)'
-        required: false
-        type: string
+
+concurrency:
+  group: adrenaline-bof-bundle-release
+  cancel-in-progress: false
 
 jobs:
-  detect:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      matrix: ${{ steps.build_matrix.outputs.matrix }}
-      has_changes: ${{ steps.build_matrix.outputs.has_changes }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Build module matrix
-        id: build_matrix
-        shell: bash
-        env:
-          INPUT_MODULE_PATH: ${{ github.event.inputs.module_path }}
-        run: |
-          set -euo pipefail
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            MODULE_PATH="${INPUT_MODULE_PATH}"
-            
-            if [[ ! -d "${MODULE_PATH}" ]]; then
-              echo "Error: Module path '${MODULE_PATH}' does not exist" >&2
-              exit 1
-            fi
-            
-            mapfile -t o_files < <(find "${MODULE_PATH}" -type f \( -name "*.o" -o -name "*.x64.o" -o -name "*.x86.o" \) 2>/dev/null || true)
-            
-            if [[ ${#o_files[@]} -eq 0 ]]; then
-              echo "Error: No .o files found in '${MODULE_PATH}'" >&2
-              exit 1
-            fi
-            
-            MODULE_DIR="${MODULE_PATH}"
-            FILES_JSON=$(printf '%s\n' "${o_files[@]}" | jq -R . | jq -s .)
-            
-            MATRIX=$(jq -n -c \
-              --arg dir "${MODULE_DIR}" \
-              --argjson files "${FILES_JSON}" \
-              '[{module_dir: $dir, files: $files}]')
-            
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            {
-              echo "matrix<<EOF"
-              echo "${MATRIX}"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-            echo "Built matrix for manual release: ${MODULE_PATH}"
-            echo "${MATRIX}" | jq .
-            exit 0
-          fi
-
-          HEAD_SHA="${GITHUB_SHA}"
-          BASE_SHA="${{ github.event.before }}"
-
-          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-            echo "No base SHA (first push). Using all .o files in HEAD."
-            git ls-tree -r --name-only "${HEAD_SHA}" | grep -E '\.(o|x64\.o|x86\.o)$' > changed_o.txt || true
-          else
-            echo "Diffing ${BASE_SHA} -> ${HEAD_SHA}"
-            git diff --name-only --diff-filter=ACMR "${BASE_SHA}" "${HEAD_SHA}" | grep -E '\.(o|x64\.o|x86\.o)$' > changed_o.txt || true
-          fi
-
-          if [[ ! -s changed_o.txt ]]; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "matrix=[]" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Changed .o files:"
-          cat changed_o.txt
-
-          declare -A MODULE_FILES
-          
-          while IFS= read -r file; do
-            [[ -z "${file}" ]] && continue
-            dir="$(dirname "${file}")"
-            if [[ "${dir}" == "." ]]; then
-              dir=""
-            fi
-            
-            if [[ -z "${MODULE_FILES[$dir]:-}" ]]; then
-              MODULE_FILES[$dir]="${file}"
-            else
-              MODULE_FILES[$dir]+=$'\n'"${file}"
-            fi
-          done < changed_o.txt
-
-          MATRIX_ENTRIES=()
-          
-          for dir in $(printf '%s\n' "${!MODULE_FILES[@]}" | sort); do
-            FILES_JSON=$(printf '%s\n' "${MODULE_FILES[$dir]}" | jq -R . | jq -s .)
-            
-            ENTRY=$(jq -n -c \
-              --arg dir "${dir}" \
-              --argjson files "${FILES_JSON}" \
-              '{module_dir: $dir, files: $files}')
-            
-            MATRIX_ENTRIES+=("${ENTRY}")
-          done
-
-          MATRIX=$(printf '%s\n' "${MATRIX_ENTRIES[@]}" | jq -s -c .)
-          
-          echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          {
-            echo "matrix<<EOF"
-            echo "${MATRIX}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-          echo "Built matrix:"
-          echo "${MATRIX}" | jq .
-
   release:
-    needs: detect
-    if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      matrix:
-        module: ${{ fromJson(needs.detect.outputs.matrix) }}
-      fail-fast: false
 
     steps:
       - name: Checkout repository
@@ -151,127 +24,116 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare module release
-        id: prepare
+      - name: Prepare complete BOF bundle
+        id: bundle
         shell: bash
-        env:
-          FILES_JSON: ${{ toJson(matrix.module.files) }}
         run: |
           set -euo pipefail
 
-          MODULE_DIR="${{ matrix.module.module_dir }}"
-          HEAD_SHA="${GITHUB_SHA}"
-          BASE_SHA="${{ github.event.before }}"
+          BUNDLE_ROOT="dist/adrenaline-bofs"
+          ARCHIVE_BASE="adrenaline-bofs"
 
-          echo "${FILES_JSON}" | jq -r '.[]' > module_files.txt
+          mkdir -p "${BUNDLE_ROOT}"
+          git ls-files -z -- '*.o' > tracked_objects.bin
 
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            BASE_SHA="${HEAD_SHA}"
-            COMMIT_RANGE="${HEAD_SHA:0:7}"
-          else
-            if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
-              BASE_SHA="${HEAD_SHA}"
-              COMMIT_RANGE="${HEAD_SHA:0:7}"
-            else
-              COMMIT_RANGE="${BASE_SHA:0:7} → ${HEAD_SHA:0:7}"
-            fi
-          fi
-
-          ASSETS=""
-          FILE_COUNT=0
-          
-          {
-            echo "release_body<<EOF"
-            echo "## Module: \`${MODULE_DIR}\`"
-            echo ""
-
-            readme_path="${MODULE_DIR:+${MODULE_DIR}/}README.md"
-            if [[ -f "${readme_path}" ]]; then
-              cat "${readme_path}" || true
-              echo ""
-            fi
-
-            echo "---"
-            echo ""
-            echo "<details><summary><b>Integrity</b> — SHA256 checksums for download verification</summary>"
-            echo ""
-            echo "| File | Size (bytes) | SHA256 |"
-            echo "|------|-------------:|--------|"
-            
-            while IFS= read -r file; do
-              [[ -z "${file}" ]] && continue
-              
-              if [[ -f "${file}" ]]; then
-                size_bytes="$(stat -c%s "${file}" 2>/dev/null || echo "0")"
-                sha256="$(sha256sum "${file}" 2>/dev/null | awk '{print $1}' || echo "N/A")"
-                
-                echo "| \`${file}\` | \`${size_bytes}\` | \`${sha256}\` |"
-                
-                ASSETS+="${file}"$'\n'
-                ((FILE_COUNT++)) || true
-              else
-                echo "Warning: File ${file} not found, skipping" >&2
-              fi
-            done < module_files.txt
-            
-            echo ""
-            echo "**Total Files:** ${FILE_COUNT}"
-            echo ""
-            echo "</details>"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          if [[ -z "${ASSETS}" ]]; then
-            echo "error=No valid asset files found for module ${MODULE_DIR}" >> "$GITHUB_OUTPUT"
+          if [[ ! -s tracked_objects.bin ]]; then
+            echo "No tracked BOF object files were found." >&2
             exit 1
           fi
 
+          OBJECT_COUNT=0
+
+          while IFS= read -r -d '' object_file; do
+            if [[ ! -f "${object_file}" ]]; then
+              echo "Tracked object file is missing: ${object_file}" >&2
+              exit 1
+            fi
+
+            install -D -m 0644 "${object_file}" "${BUNDLE_ROOT}/${object_file}"
+            ((OBJECT_COUNT += 1))
+
+            module_readme="$(dirname "${object_file}")/README.md"
+            if [[ -f "${module_readme}" ]]; then
+              install -D -m 0644 "${module_readme}" "${BUNDLE_ROOT}/${module_readme}"
+            fi
+          done < tracked_objects.bin
+
+          install -m 0644 README.md "${BUNDLE_ROOT}/README.md"
+
+          (
+            cd "${BUNDLE_ROOT}"
+            find . -type f -name '*.o' -print0 \
+              | sort -z \
+              | xargs -0 sha256sum \
+              > SHA256SUMS
+          )
+
+          MODULE_COUNT="$(find "${BUNDLE_ROOT}" -type f -name '*.o' -printf '%h\n' | sort -u | wc -l | tr -d ' ')"
+
           {
-            echo "files<<EOF"
-            printf "%s" "${ASSETS}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+            echo "# Adrenaline BOF Bundle"
+            echo
+            echo "Complete tracked BOF bundle from commit \`${GITHUB_SHA}\`."
+            echo
+            echo "- BOF object files: ${OBJECT_COUNT}"
+            echo "- Module directories: ${MODULE_COUNT}"
+            echo "- Paths are preserved by category and module."
+            echo "- Verify downloads with \`SHA256SUMS\` inside the archive."
+          } > "${BUNDLE_ROOT}/BUNDLE_INFO.md"
 
-          echo "file_count=${FILE_COUNT}" >> "$GITHUB_OUTPUT"
-          echo "Prepared release for module: ${MODULE_DIR} with ${FILE_COUNT} file(s)"
+          (
+            cd dist
+            tar -czf "${ARCHIVE_BASE}.tar.gz" "adrenaline-bofs"
+            zip -q -r "${ARCHIVE_BASE}.zip" "adrenaline-bofs"
+          )
 
-      - name: Create release tag
-        id: tag
-        shell: bash
+          (
+            cd dist
+            sha256sum "${ARCHIVE_BASE}.tar.gz" "${ARCHIVE_BASE}.zip" > SHA256SUMS
+          )
+
+          {
+            echo "# Adrenaline BOF Bundle"
+            echo
+            echo "This rolling release contains every tracked BOF object file in the repository."
+            echo "It is updated in place whenever any BOF object changes on \`main\`, so operators can download one coherent bundle instead of choosing among per-module releases."
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- BOF object files: ${OBJECT_COUNT}"
+            echo "- Module directories: ${MODULE_COUNT}"
+            echo
+            echo "Download either archive format. Both preserve the repository's category/module layout and include module READMEs plus per-object SHA256 checksums."
+          } > release-notes.md
+
+          echo "object_count=${OBJECT_COUNT}" >> "${GITHUB_OUTPUT}"
+          echo "module_count=${MODULE_COUNT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Move rolling bundle tag to this commit
         env:
-          INPUT_TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
+          RELEASE_TAG: adrenaline-bof-bundle-latest
+        shell: bash
         run: |
           set -euo pipefail
 
-          MODULE_DIR="${{ matrix.module.module_dir }}"
-          HEAD_SHA="${GITHUB_SHA}"
-          
-          SANITIZED_DIR="${MODULE_DIR//\//-}"
-          
-          if [[ -z "${SANITIZED_DIR}" ]]; then
-            SANITIZED_DIR="root"
-          fi
-          
-          TS="$(date -u +"%Y-%m-%d-%H%M%S")"
-          SHORT="${HEAD_SHA:0:7}"
-          
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${INPUT_TAG_SUFFIX}" ]]; then
-            TAG="${SANITIZED_DIR}-${INPUT_TAG_SUFFIX}"
-          else
-            TAG="${SANITIZED_DIR}-${TS}-${SHORT}"
-          fi
-          
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Created tag: ${TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --force "${RELEASE_TAG}" "${GITHUB_SHA}"
+          git push --force origin "refs/tags/${RELEASE_TAG}"
 
-      - name: Create GitHub Release
+      - name: Create or update rolling bundle release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: Release ${{ steps.tag.outputs.tag }}
-          body: ${{ steps.prepare.outputs.release_body }}
+          tag_name: adrenaline-bof-bundle-latest
+          name: Adrenaline BOF Bundle (Latest)
+          body_path: release-notes.md
           draft: false
           prerelease: false
-          files: ${{ steps.prepare.outputs.files }}
+          make_latest: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/adrenaline-bofs.tar.gz
+            dist/adrenaline-bofs.zip
+            dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
