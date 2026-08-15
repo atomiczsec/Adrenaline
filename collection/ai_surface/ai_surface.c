@@ -591,16 +591,32 @@ static void check_taskbar_ai_setting(void) {
 }
 
 static void check_windows_copilot(void) {
-    wchar_t localApp[MAX_PATH_LEN];
-    wchar_t packagesRoot[MAX_PATH_LEN];
-    wchar_t search[MAX_PATH_LEN];
-    wchar_t localState[MAX_PATH_LEN];
-    wchar_t sub[MAX_PATH_LEN];
-    WIN32_FIND_DATAW fd;
+    typedef struct {
+        wchar_t localApp[MAX_PATH_LEN];
+        wchar_t packagesRoot[MAX_PATH_LEN];
+        wchar_t search[MAX_PATH_LEN];
+        wchar_t localState[MAX_PATH_LEN];
+        wchar_t sub[MAX_PATH_LEN];
+        WIN32_FIND_DATAW fd;
+    } windows_copilot_scratch_t;
+    windows_copilot_scratch_t *scratch = (windows_copilot_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(windows_copilot_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     HANDLE hFind = INVALID_HANDLE_VALUE;
     int found = 0;
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_WINDOWS_COPILOT ":\n");
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for Windows Copilot scratch buffer\n");
+        return;
+    }
+
+#define localApp (scratch->localApp)
+#define packagesRoot (scratch->packagesRoot)
+#define search (scratch->search)
+#define localState (scratch->localState)
+#define sub (scratch->sub)
+#define fd (scratch->fd)
 
     inline_memset(localApp, 0, sizeof(localApp));
     inline_memset(packagesRoot, 0, sizeof(packagesRoot));
@@ -675,18 +691,39 @@ cleanup:
     if (hFind != INVALID_HANDLE_VALUE) {
         KERNEL32$FindClose(hFind);
     }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef localApp
+#undef packagesRoot
+#undef search
+#undef localState
+#undef sub
+#undef fd
 }
 
 static void check_office_copilot(void) {
+    typedef struct {
+        wchar_t appData[MAX_PATH_LEN];
+        wchar_t localAppData[MAX_PATH_LEN];
+        wchar_t path[MAX_PATH_LEN];
+    } office_copilot_scratch_t;
+    office_copilot_scratch_t *scratch = (office_copilot_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(office_copilot_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     HKEY hKey = NULL;
     LONG res;
-    wchar_t appData[MAX_PATH_LEN];
-    wchar_t localAppData[MAX_PATH_LEN];
-    wchar_t path[MAX_PATH_LEN];
     int office_installed = 0;
     int any = 0;
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_OFFICE_COPILOT ":\n");
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for Office Copilot scratch buffer\n");
+        return;
+    }
+
+#define appData (scratch->appData)
+#define localAppData (scratch->localAppData)
+#define path (scratch->path)
 
     res = ADVAPI32$RegOpenKeyExW(
         HKEY_CURRENT_USER,
@@ -742,19 +779,40 @@ static void check_office_copilot(void) {
     if (!office_installed && !any) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
     }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef appData
+#undef localAppData
+#undef path
 }
 
 static void check_edge_copilot(void) {
-    wchar_t localApp[MAX_PATH_LEN];
-    wchar_t path[MAX_PATH_LEN];
-    wchar_t profileSearch[MAX_PATH_LEN];
-    wchar_t profileLeveldb[MAX_PATH_LEN];
-    char ascii[256];
-    WIN32_FIND_DATAW fd;
+    typedef struct {
+        wchar_t localApp[MAX_PATH_LEN];
+        wchar_t path[MAX_PATH_LEN];
+        wchar_t profileSearch[MAX_PATH_LEN];
+        wchar_t profileLeveldb[MAX_PATH_LEN];
+        char ascii[256];
+        WIN32_FIND_DATAW fd;
+    } edge_copilot_scratch_t;
+    edge_copilot_scratch_t *scratch = (edge_copilot_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(edge_copilot_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     HANDLE hFind = INVALID_HANDLE_VALUE;
     int any = 0;
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_EDGE_COPILOT ":\n");
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for Edge Copilot scratch buffer\n");
+        return;
+    }
+
+#define localApp (scratch->localApp)
+#define path (scratch->path)
+#define profileSearch (scratch->profileSearch)
+#define profileLeveldb (scratch->profileLeveldb)
+#define ascii (scratch->ascii)
+#define fd (scratch->fd)
 
     inline_memset(localApp, 0, sizeof(localApp));
     inline_memset(path, 0, sizeof(path));
@@ -820,6 +878,14 @@ cleanup:
     if (hFind != INVALID_HANDLE_VALUE) {
         KERNEL32$FindClose(hFind);
     }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef localApp
+#undef path
+#undef profileSearch
+#undef profileLeveldb
+#undef ascii
+#undef fd
 }
 
 static void scan_vscode_workspace_storage(const wchar_t *base_path, const wchar_t *variant_name) {
@@ -839,12 +905,25 @@ static void scan_vscode_workspace_storage(const wchar_t *base_path, const wchar_
 }
 
 static void check_github_copilot(void) {
-    wchar_t appData[MAX_PATH_LEN];
-    wchar_t path[MAX_PATH_LEN];
-    wchar_t codePath[MAX_PATH_LEN];
+    typedef struct {
+        wchar_t appData[MAX_PATH_LEN];
+        wchar_t path[MAX_PATH_LEN];
+        wchar_t codePath[MAX_PATH_LEN];
+    } github_copilot_scratch_t;
+    github_copilot_scratch_t *scratch = (github_copilot_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(github_copilot_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     int any = 0;
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_GH_COPILOT ":\n");
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for GitHub Copilot scratch buffer\n");
+        return;
+    }
+
+#define appData (scratch->appData)
+#define path (scratch->path)
+#define codePath (scratch->codePath)
 
     inline_memset(appData, 0, sizeof(appData));
     inline_memset(path, 0, sizeof(path));
@@ -852,7 +931,7 @@ static void check_github_copilot(void) {
 
     if (KERNEL32$GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH_LEN) == 0) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
-        return;
+        goto cleanup;
     }
 
     if (build_path(appData, L"\\Code\\User\\globalStorage\\github.copilot", path, MAX_PATH_LEN) &&
@@ -894,21 +973,40 @@ static void check_github_copilot(void) {
     if (!any) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
     }
+
+cleanup:
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef appData
+#undef path
+#undef codePath
 }
 
 static void check_third_party_ai(void) {
-    wchar_t appData[MAX_PATH_LEN];
-    wchar_t path[MAX_PATH_LEN];
+    typedef struct {
+        wchar_t appData[MAX_PATH_LEN];
+        wchar_t path[MAX_PATH_LEN];
+    } third_party_scratch_t;
+    third_party_scratch_t *scratch = (third_party_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(third_party_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     int any = 0;
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_THIRD_PARTY_AI ":\n");
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for third-party AI scratch buffer\n");
+        return;
+    }
+
+#define appData (scratch->appData)
+#define path (scratch->path)
 
     inline_memset(appData, 0, sizeof(appData));
     inline_memset(path, 0, sizeof(path));
 
     if (KERNEL32$GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH_LEN) == 0) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
-        return;
+        goto cleanup;
     }
 
     if (build_path(appData, L"\\ChatGPT\\Local Storage\\leveldb", path, MAX_PATH_LEN) &&
@@ -955,6 +1053,12 @@ static void check_third_party_ai(void) {
     if (!any) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
     }
+
+cleanup:
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef appData
+#undef path
 }
 
 static void check_ai_agent_artifacts(void) {
@@ -973,11 +1077,23 @@ static void check_ai_agent_artifacts(void) {
     int claude_shell_ide_debug = 0;
     int codex_any = 0;
     int claude_any = 0;
-    wchar_t codex_root[MAX_PATH_LEN];
-    wchar_t claude_root[MAX_PATH_LEN];
+    typedef struct {
+        wchar_t codex_root[MAX_PATH_LEN];
+        wchar_t claude_root[MAX_PATH_LEN];
+    } agent_artifact_scratch_t;
+    agent_artifact_scratch_t *scratch = (agent_artifact_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(agent_artifact_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     DWORD needed;
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_AI_AGENT_ARTIFACTS ":\n");
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for AI agent artifact scratch buffer\n");
+        return;
+    }
+
+#define codex_root (scratch->codex_root)
+#define claude_root (scratch->claude_root)
 
     codex_sessions =
         expanded_path_exists(L"%USERPROFILE%\\.codex\\sessions") ||
@@ -1040,7 +1156,7 @@ static void check_ai_agent_artifacts(void) {
 
     if (!codex_any && !claude_any) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] Not detected\n");
-        return;
+        goto cleanup;
     }
 
     inline_memset(codex_root, 0, sizeof(codex_root));
@@ -1074,11 +1190,21 @@ static void check_ai_agent_artifacts(void) {
         codex_any ? "yes" : "no",
         claude_any ? "yes" : "no"
     );
+
+cleanup:
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef codex_root
+#undef claude_root
 }
 
 static void scan_vscode_mcp_extensions(const wchar_t *storage_root, const wchar_t *variant_name, scan_results_t *results) {
-    wchar_t search[MAX_PATH_LEN];
-    WIN32_FIND_DATAW fd;
+    typedef struct {
+        wchar_t search[MAX_PATH_LEN];
+        WIN32_FIND_DATAW fd;
+        char ascii[260];
+    } vscode_mcp_scratch_t;
+    vscode_mcp_scratch_t *scratch = NULL;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     int any = 0;
 
@@ -1089,20 +1215,29 @@ static void scan_vscode_mcp_extensions(const wchar_t *storage_root, const wchar_
         return;
     }
 
+    scratch = (vscode_mcp_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(vscode_mcp_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for MCP extension scan scratch buffer\n");
+        return;
+    }
+
+#define search (scratch->search)
+#define fd (scratch->fd)
+#define ascii (scratch->ascii)
+
     inline_memset(search, 0, sizeof(search));
     inline_memset(&fd, 0, sizeof(fd));
     if (!build_path(storage_root, L"\\*", search, MAX_PATH_LEN)) {
-        return;
+        goto cleanup;
     }
 
     hFind = KERNEL32$FindFirstFileW(search, &fd);
     if (hFind == INVALID_HANDLE_VALUE) {
-        return;
+        goto cleanup;
     }
 
     do {
-        char ascii[260];
-
         if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 || fd.cFileName[0] == L'.') {
             continue;
         }
@@ -1125,7 +1260,15 @@ static void scan_vscode_mcp_extensions(const wchar_t *storage_root, const wchar_
         results->mcp_files_found++;
     } while (KERNEL32$FindNextFileW(hFind, &fd));
 
-    KERNEL32$FindClose(hFind);
+cleanup:
+    if (hFind != INVALID_HANDLE_VALUE) {
+        KERNEL32$FindClose(hFind);
+    }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef search
+#undef fd
+#undef ascii
 }
 
 static void inspect_project_candidate(const wchar_t *project_path, scan_results_t *results) {
@@ -1156,10 +1299,13 @@ static void inspect_project_candidate(const wchar_t *project_path, scan_results_
 }
 
 static void scan_project_root_pattern(const wchar_t *root_pattern, scan_results_t *results) {
-    wchar_t root[MAX_PATH_LEN];
-    wchar_t search[MAX_PATH_LEN];
-    wchar_t child[MAX_PATH_LEN];
-    WIN32_FIND_DATAW fd;
+    typedef struct {
+        wchar_t root[MAX_PATH_LEN];
+        wchar_t search[MAX_PATH_LEN];
+        wchar_t child[MAX_PATH_LEN];
+        WIN32_FIND_DATAW fd;
+    } project_root_scratch_t;
+    project_root_scratch_t *scratch = NULL;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     DWORD needed;
 
@@ -1167,26 +1313,38 @@ static void scan_project_root_pattern(const wchar_t *root_pattern, scan_results_
         return;
     }
 
+    scratch = (project_root_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(project_root_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for project-root scan scratch buffer\n");
+        return;
+    }
+
+#define root (scratch->root)
+#define search (scratch->search)
+#define child (scratch->child)
+#define fd (scratch->fd)
+
     inline_memset(root, 0, sizeof(root));
     needed = KERNEL32$ExpandEnvironmentStringsW(root_pattern, root, MAX_PATH_LEN);
     if (needed == 0 || needed > MAX_PATH_LEN || !is_directory(root)) {
-        return;
+        goto cleanup;
     }
 
     inspect_project_candidate(root, results);
     if (results->project_hits >= MAX_PROJECT_HITS) {
-        return;
+        goto cleanup;
     }
 
     inline_memset(search, 0, sizeof(search));
     inline_memset(&fd, 0, sizeof(fd));
     if (!build_path(root, L"\\*", search, MAX_PATH_LEN)) {
-        return;
+        goto cleanup;
     }
 
     hFind = KERNEL32$FindFirstFileW(search, &fd);
     if (hFind == INVALID_HANDLE_VALUE) {
-        return;
+        goto cleanup;
     }
 
     do {
@@ -1205,7 +1363,16 @@ static void scan_project_root_pattern(const wchar_t *root_pattern, scan_results_
         inspect_project_candidate(child, results);
     } while (KERNEL32$FindNextFileW(hFind, &fd));
 
-    KERNEL32$FindClose(hFind);
+cleanup:
+    if (hFind != INVALID_HANDLE_VALUE) {
+        KERNEL32$FindClose(hFind);
+    }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef root
+#undef search
+#undef child
+#undef fd
 }
 
 static void check_mcp_configs(scan_results_t *results) {
@@ -1226,13 +1393,26 @@ static void check_mcp_configs(scan_results_t *results) {
         L"%USERPROFILE%\\Documents\\Projects",
         L"%USERPROFILE%\\Desktop"
     };
+    typedef struct {
+        wchar_t appData[MAX_PATH_LEN];
+        wchar_t path[MAX_PATH_LEN];
+    } mcp_config_scratch_t;
+    mcp_config_scratch_t *scratch = NULL;
     size_t i;
-    wchar_t appData[MAX_PATH_LEN];
-    wchar_t path[MAX_PATH_LEN];
 
     if (!results) {
         return;
     }
+
+    scratch = (mcp_config_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(mcp_config_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for MCP configuration scratch buffer\n");
+        return;
+    }
+
+#define appData (scratch->appData)
+#define path (scratch->path)
 
     BeaconPrintf(CALLBACK_OUTPUT, "\n" SECTION_MCP_CONFIGS ":\n");
 
@@ -1270,6 +1450,10 @@ static void check_mcp_configs(scan_results_t *results) {
             results->mcp_files_found
         );
     }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef appData
+#undef path
 }
 
 void go(char *args, unsigned long alen) {

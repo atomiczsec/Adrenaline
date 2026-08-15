@@ -462,10 +462,12 @@ cleanup:
 
 DWORD WINAPI StaThread(LPVOID lpParameter) {
     task_args *args = (task_args *)lpParameter;
+    HANDLE process_heap = KERNEL32$GetProcessHeap();
 
     HRESULT hr = OLE32$CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (FAILED(hr)) {
         BeaconPrintf(CALLBACK_ERROR, "[-] CoInitializeEx failed in STA thread (0x%lx)\n", (unsigned long)hr);
+        KERNEL32$HeapFree(process_heap, 0, args);
         return 1;
     }
 
@@ -474,6 +476,7 @@ DWORD WINAPI StaThread(LPVOID lpParameter) {
     if (FAILED(hr) && hr != RPC_E_TOO_LATE) {
         BeaconPrintf(CALLBACK_ERROR, "[-] CoInitializeSecurity failed (0x%lx)\n", (unsigned long)hr);
         OLE32$CoUninitialize();
+        KERNEL32$HeapFree(process_heap, 0, args);
         return 1;
     }
 
@@ -481,6 +484,7 @@ DWORD WINAPI StaThread(LPVOID lpParameter) {
     perform_task_enumeration(args);
 
     OLE32$CoUninitialize();
+    KERNEL32$HeapFree(process_heap, 0, args);
     return 0;
 }
 
@@ -524,16 +528,13 @@ void go(char *args, unsigned long alen) {
         0, NULL);
 
     if (hThread) {
-        DWORD wait = KERNEL32$WaitForSingleObject(hThread, 30000);
-        if (wait == WAIT_TIMEOUT) {
-            BeaconPrintf(CALLBACK_ERROR, "[!] STA thread timed out (30s) – deep recursion likely");
-        } else if (wait != WAIT_OBJECT_0) {
+        DWORD wait = KERNEL32$WaitForSingleObject(hThread, INFINITE);
+        if (wait != WAIT_OBJECT_0) {
             BeaconPrintf(CALLBACK_ERROR, "[-] WaitForSingleObject failed (0x%lx)", wait);
         }
         KERNEL32$CloseHandle(hThread);
     } else {
         BeaconPrintf(CALLBACK_ERROR, "[-] CreateThread failed (GLE: %ld)", KERNEL32$GetLastError());
+        KERNEL32$HeapFree(KERNEL32$GetProcessHeap(), 0, thread_args);
     }
-
-    KERNEL32$HeapFree(KERNEL32$GetProcessHeap(), 0, thread_args);
 }

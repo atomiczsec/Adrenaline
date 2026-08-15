@@ -321,6 +321,8 @@ DECLSPEC_IMPORT LONG WINAPI ADVAPI32$RegQueryValueExW(HKEY, LPCWSTR, LPDWORD, LP
 DECLSPEC_IMPORT LONG WINAPI ADVAPI32$RegCloseKey(HKEY);
 DECLSPEC_IMPORT WINBASEAPI int WINAPI KERNEL32$WideCharToMultiByte(UINT, DWORD, LPCWSTR, int, LPSTR, int, LPCSTR, LPBOOL);
 DECLSPEC_IMPORT WINBASEAPI int WINAPI KERNEL32$MultiByteToWideChar(UINT, DWORD, LPCCH, int, LPWSTR, int);
+DECLSPEC_IMPORT WINBASEAPI LPVOID WINAPI KERNEL32$VirtualAlloc(LPVOID, SIZE_T, DWORD, DWORD);
+DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$VirtualFree(LPVOID, SIZE_T, DWORD);
 DECLSPEC_IMPORT HRESULT WINAPI OLE32$CoInitializeEx(LPVOID, DWORD);
 DECLSPEC_IMPORT VOID WINAPI OLE32$CoUninitialize(VOID);
 DECLSPEC_IMPORT HRESULT WINAPI OLE32$CoCreateInstance(REFCLSID, LPUNKNOWN, DWORD, REFIID, LPVOID*);
@@ -716,12 +718,27 @@ static const policy_whitelist_entry *find_whitelist_match(const wchar_t *path, c
 static void emit_finding(const wchar_t *key_path, const wchar_t *value_name, DWORD value_type,
                          const BYTE *data, DWORD data_size, const policy_whitelist_entry *entry,
                          scan_counters *counters) {
-    char path_utf8[MAX_KEY_PATH];
-    char value_utf8[MAX_VALUE_NAME];
-    char data_utf8[MAX_DATA_STRING];
-    char number_buf[64];
-    wchar_t rooted_path[MAX_KEY_PATH];
+    typedef struct {
+        char path_utf8[MAX_KEY_PATH];
+        char value_utf8[MAX_VALUE_NAME];
+        char data_utf8[MAX_DATA_STRING];
+        char number_buf[64];
+        wchar_t rooted_path[MAX_KEY_PATH];
+    } finding_scratch_t;
+    finding_scratch_t *scratch = (finding_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(finding_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     const char *type_name = registry_type_name(value_type);
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for MDM finding scratch buffer\n");
+        return;
+    }
+
+#define path_utf8 (scratch->path_utf8)
+#define value_utf8 (scratch->value_utf8)
+#define data_utf8 (scratch->data_utf8)
+#define number_buf (scratch->number_buf)
+#define rooted_path (scratch->rooted_path)
 
     inline_memset(path_utf8, 0, sizeof(path_utf8));
     inline_memset(value_utf8, 0, sizeof(value_utf8));
@@ -771,19 +788,31 @@ static void emit_finding(const wchar_t *key_path, const wchar_t *value_name, DWO
     }
 
     counters->values_printed++;
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef path_utf8
+#undef value_utf8
+#undef data_utf8
+#undef number_buf
+#undef rooted_path
 }
 
 
 static void check_dsregcmd_equivalent(scan_counters *counters) {
+    typedef struct {
+        wchar_t subkey_name[MAX_VALUE_NAME];
+        wchar_t join_path[MAX_KEY_PATH];
+        char path_utf8[MAX_KEY_PATH];
+        char value_utf8[MAX_VALUE_NAME];
+        char data_utf8[MAX_DATA_STRING];
+        BYTE data[MAX_VALUE_DATA];
+    } dsreg_scratch_t;
+    dsreg_scratch_t *scratch = NULL;
     HKEY hKey;
     LONG result;
     DWORD index = 0;
-    wchar_t subkey_name[MAX_VALUE_NAME];
     DWORD subkey_size;
     int found_join = 0;
-    char path_utf8[MAX_KEY_PATH];
-    char value_utf8[MAX_VALUE_NAME];
-    char data_utf8[MAX_DATA_STRING];
     
     result = ADVAPI32$RegOpenKeyExW(
         HKEY_LOCAL_MACHINE,
@@ -796,6 +825,21 @@ static void check_dsregcmd_equivalent(scan_counters *counters) {
     if (result != ERROR_SUCCESS) {
         return;
     }
+
+    scratch = (dsreg_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(dsreg_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        ADVAPI32$RegCloseKey(hKey);
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for join-state scratch buffer\n");
+        return;
+    }
+
+#define subkey_name (scratch->subkey_name)
+#define join_path (scratch->join_path)
+#define path_utf8 (scratch->path_utf8)
+#define value_utf8 (scratch->value_utf8)
+#define data_utf8 (scratch->data_utf8)
+#define data (scratch->data)
     
     
     while (1) {
@@ -811,14 +855,12 @@ static void check_dsregcmd_equivalent(scan_counters *counters) {
         }
         
         HKEY hJoinKey;
-        wchar_t join_path[MAX_KEY_PATH];
         build_subkey_path(L"SYSTEM\\CurrentControlSet\\Control\\CloudDomainJoin\\JoinInfo", subkey_name, join_path, MAX_KEY_PATH);
         
         result = ADVAPI32$RegOpenKeyExW(HKEY_LOCAL_MACHINE, join_path, 0, KEY_READ, &hJoinKey);
         if (result == ERROR_SUCCESS) {
             
             DWORD value_type;
-            BYTE data[MAX_VALUE_DATA];
             DWORD data_size = sizeof(data);
             inline_memset(data, 0, sizeof(data));
             
@@ -864,7 +906,6 @@ static void check_dsregcmd_equivalent(scan_counters *counters) {
     
     if (result == ERROR_SUCCESS) {
         DWORD value_type;
-        BYTE data[MAX_VALUE_DATA];
         DWORD data_size = sizeof(data);
         inline_memset(data, 0, sizeof(data));
         
@@ -883,17 +924,29 @@ static void check_dsregcmd_equivalent(scan_counters *counters) {
         
         ADVAPI32$RegCloseKey(hKey);
     }
+
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef subkey_name
+#undef join_path
+#undef path_utf8
+#undef value_utf8
+#undef data_utf8
+#undef data
 }
 
 
 static void check_mdm_config_policy(scan_counters *counters) {
+    typedef struct {
+        BYTE data[MAX_VALUE_DATA];
+        char path_utf8[MAX_KEY_PATH];
+        char number_buf[64];
+    } policy_scratch_t;
+    policy_scratch_t *scratch = NULL;
     HKEY hKey;
     LONG result;
     DWORD value_type;
-    BYTE data[MAX_VALUE_DATA];
-    DWORD data_size = sizeof(data);
-    char path_utf8[MAX_KEY_PATH];
-    char number_buf[64];
+    DWORD data_size = MAX_VALUE_DATA;
     
     result = ADVAPI32$RegOpenKeyExW(
         HKEY_LOCAL_MACHINE,
@@ -906,6 +959,18 @@ static void check_mdm_config_policy(scan_counters *counters) {
     if (result != ERROR_SUCCESS) {
         return;
     }
+
+    scratch = (policy_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(policy_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        ADVAPI32$RegCloseKey(hKey);
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for MDM policy scratch buffer\n");
+        return;
+    }
+
+#define data (scratch->data)
+#define path_utf8 (scratch->path_utf8)
+#define number_buf (scratch->number_buf)
     
     inline_memset(data, 0, sizeof(data));
     result = ADVAPI32$RegQueryValueExW(hKey, L"AutoEnrollMDM", NULL, &value_type, data, &data_size);
@@ -924,17 +989,25 @@ static void check_mdm_config_policy(scan_counters *counters) {
     }
     
     ADVAPI32$RegCloseKey(hKey);
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef data
+#undef path_utf8
+#undef number_buf
 }
 
 
 static void check_intune_evidence(scan_counters *counters) {
+    typedef struct {
+        BYTE data[MAX_VALUE_DATA];
+        char path_utf8[MAX_KEY_PATH];
+        char data_utf8[MAX_DATA_STRING];
+    } intune_scratch_t;
+    intune_scratch_t *scratch = NULL;
     HKEY hKey;
     LONG result;
     DWORD value_type;
-    BYTE data[MAX_VALUE_DATA];
-    DWORD data_size = sizeof(data);
-    char path_utf8[MAX_KEY_PATH];
-    char data_utf8[MAX_DATA_STRING];
+    DWORD data_size = MAX_VALUE_DATA;
     
    
     result = ADVAPI32$RegOpenKeyExW(
@@ -946,6 +1019,18 @@ static void check_intune_evidence(scan_counters *counters) {
     );
     
     if (result == ERROR_SUCCESS) {
+        scratch = (intune_scratch_t *)KERNEL32$VirtualAlloc(
+            NULL, sizeof(intune_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (!scratch) {
+            ADVAPI32$RegCloseKey(hKey);
+            BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for Intune evidence scratch buffer\n");
+            return;
+        }
+
+#define data (scratch->data)
+#define path_utf8 (scratch->path_utf8)
+#define data_utf8 (scratch->data_utf8)
+
         inline_memset(data, 0, sizeof(data));
         data_size = sizeof(data);
         result = ADVAPI32$RegQueryValueExW(hKey, L"MDMDeviceID", NULL, &value_type, data, &data_size);
@@ -961,6 +1046,11 @@ static void check_intune_evidence(scan_counters *counters) {
         }
         
         ADVAPI32$RegCloseKey(hKey);
+        KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef data
+#undef path_utf8
+#undef data_utf8
     }
 }
 
@@ -1106,20 +1196,54 @@ static int is_meaningful_enrollment(DWORD enrollment_type, int has_device_id, in
 
 
 static void emit_enrollment_grouped(const wchar_t *key_path, HKEY hKey, scan_counters *counters) {
-    char path_utf8[MAX_KEY_PATH];
-    wchar_t rooted_path[MAX_KEY_PATH];
+    typedef struct {
+        char path_utf8[MAX_KEY_PATH];
+        wchar_t rooted_path[MAX_KEY_PATH];
+        wchar_t aad_device_id[MAX_VALUE_DATA / sizeof(wchar_t)];
+        wchar_t tenant_id[MAX_VALUE_DATA / sizeof(wchar_t)];
+        wchar_t provider_id[MAX_VALUE_DATA / sizeof(wchar_t)];
+        wchar_t discovery_url[MAX_VALUE_DATA / sizeof(wchar_t)];
+        wchar_t enrollment_guid[MAX_GUID_STRING];
+        wchar_t value_name[MAX_VALUE_NAME];
+        BYTE data[MAX_VALUE_DATA];
+        char number_buf[64];
+        char device_id_utf8[MAX_DATA_STRING];
+        char tenant_id_utf8[MAX_DATA_STRING];
+        char provider_id_utf8[MAX_DATA_STRING];
+        char discovery_url_utf8[MAX_DATA_STRING];
+        char guid_utf8[MAX_GUID_STRING];
+    } enrollment_scratch_t;
+    enrollment_scratch_t *scratch = (enrollment_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(enrollment_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     DWORD enrollment_state = 0;
     DWORD enrollment_type = 0;
-    wchar_t aad_device_id[MAX_VALUE_DATA / sizeof(wchar_t)] = {0};
-    wchar_t tenant_id[MAX_VALUE_DATA / sizeof(wchar_t)] = {0};
-    wchar_t provider_id[MAX_VALUE_DATA / sizeof(wchar_t)] = {0};
-    wchar_t discovery_url[MAX_VALUE_DATA / sizeof(wchar_t)] = {0};
-    wchar_t enrollment_guid[MAX_GUID_STRING] = {0};
     int has_state = 0, has_type = 0, has_device_id = 0, has_tenant_id = 0;
     int has_provider = 0, has_discovery_url = 0;
     DWORD value_type;
     DWORD data_size;
     LONG result;
+
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for enrollment scratch buffer\n");
+        return;
+    }
+    inline_memset(scratch, 0, sizeof(*scratch));
+
+#define path_utf8 (scratch->path_utf8)
+#define rooted_path (scratch->rooted_path)
+#define aad_device_id (scratch->aad_device_id)
+#define tenant_id (scratch->tenant_id)
+#define provider_id (scratch->provider_id)
+#define discovery_url (scratch->discovery_url)
+#define enrollment_guid (scratch->enrollment_guid)
+#define value_name (scratch->value_name)
+#define data (scratch->data)
+#define number_buf (scratch->number_buf)
+#define device_id_utf8 (scratch->device_id_utf8)
+#define tenant_id_utf8 (scratch->tenant_id_utf8)
+#define provider_id_utf8 (scratch->provider_id_utf8)
+#define discovery_url_utf8 (scratch->discovery_url_utf8)
+#define guid_utf8 (scratch->guid_utf8)
 
     build_rooted_path(key_path, rooted_path, MAX_KEY_PATH);
     wide_to_utf8(rooted_path, path_utf8, sizeof(path_utf8));
@@ -1137,7 +1261,6 @@ static void emit_enrollment_grouped(const wchar_t *key_path, HKEY hKey, scan_cou
    
     DWORD index = 0;
     while (1) {
-        wchar_t value_name[MAX_VALUE_NAME];
         DWORD value_name_size = MAX_VALUE_NAME;
         inline_memset(value_name, 0, sizeof(value_name));
 
@@ -1151,7 +1274,6 @@ static void emit_enrollment_grouped(const wchar_t *key_path, HKEY hKey, scan_cou
         }
 
         data_size = MAX_VALUE_DATA;
-        BYTE data[MAX_VALUE_DATA];
         inline_memset(data, 0, sizeof(data));
         result = ADVAPI32$RegQueryValueExW(hKey, value_name, NULL, &value_type, data, &data_size);
         
@@ -1198,13 +1320,6 @@ static void emit_enrollment_grouped(const wchar_t *key_path, HKEY hKey, scan_cou
     
     if ((has_state || has_type || has_device_id || has_tenant_id) &&
         is_meaningful_enrollment(enrollment_type, has_device_id, has_tenant_id, has_provider, has_discovery_url)) {
-        char number_buf[64];
-        char device_id_utf8[MAX_DATA_STRING];
-        char tenant_id_utf8[MAX_DATA_STRING];
-        char provider_id_utf8[MAX_DATA_STRING];
-        char discovery_url_utf8[MAX_DATA_STRING];
-        char guid_utf8[MAX_GUID_STRING];
-        
         inline_memset(number_buf, 0, sizeof(number_buf));
         inline_memset(device_id_utf8, 0, sizeof(device_id_utf8));
         inline_memset(tenant_id_utf8, 0, sizeof(tenant_id_utf8));
@@ -1259,19 +1374,51 @@ static void emit_enrollment_grouped(const wchar_t *key_path, HKEY hKey, scan_cou
         counters->values_printed++;
         counters->score.enrollments_registry = 1;
     }
+
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef path_utf8
+#undef rooted_path
+#undef aad_device_id
+#undef tenant_id
+#undef provider_id
+#undef discovery_url
+#undef enrollment_guid
+#undef value_name
+#undef data
+#undef number_buf
+#undef device_id_utf8
+#undef tenant_id_utf8
+#undef provider_id_utf8
+#undef discovery_url_utf8
+#undef guid_utf8
 }
 
 static void enumerate_values(HKEY hKey, const wchar_t *key_path, scan_counters *counters) {
+    typedef struct {
+        wchar_t value_name[MAX_VALUE_NAME];
+        BYTE data[MAX_VALUE_DATA];
+    } value_scratch_t;
+    value_scratch_t *scratch = NULL;
     
     if (is_enrollment_path(key_path)) {
         emit_enrollment_grouped(key_path, hKey, counters);
         return;
     }
 
+    scratch = (value_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(value_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for registry value scratch buffer\n");
+        return;
+    }
+
+#define value_name (scratch->value_name)
+#define data (scratch->data)
+
     
     DWORD index = 0;
     LONG result;
-    wchar_t value_name[MAX_VALUE_NAME];
     DWORD value_name_size;
 
     while (1) {
@@ -1291,7 +1438,6 @@ static void enumerate_values(HKEY hKey, const wchar_t *key_path, scan_counters *
         const policy_whitelist_entry *entry = find_whitelist_match(key_path, value_name);
         if (entry) {
             DWORD value_type = 0;
-            BYTE data[MAX_VALUE_DATA];
             DWORD data_size = sizeof(data);
             inline_memset(data, 0, sizeof(data));
 
@@ -1304,14 +1450,23 @@ static void enumerate_values(HKEY hKey, const wchar_t *key_path, scan_counters *
 
         index++;
     }
+
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef value_name
+#undef data
 }
 
 
 static void enumerate_registry_tree(HKEY root, const wchar_t *base_path, int depth, scan_counters *counters) {
+    typedef struct {
+        wchar_t subkey_name[MAX_VALUE_NAME];
+        wchar_t next_path[MAX_KEY_PATH];
+    } tree_scratch_t;
+    tree_scratch_t *scratch = NULL;
     HKEY hKey;
     LONG result;
     DWORD index = 0;
-    wchar_t subkey_name[MAX_VALUE_NAME];
     DWORD subkey_size;
 
     result = ADVAPI32$RegOpenKeyExW(root, base_path, 0, KEY_READ, &hKey);
@@ -1323,10 +1478,22 @@ static void enumerate_registry_tree(HKEY root, const wchar_t *base_path, int dep
         return;
     }
 
+    scratch = (tree_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(tree_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        ADVAPI32$RegCloseKey(hKey);
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for registry tree scratch buffer\n");
+        return;
+    }
+
+#define subkey_name (scratch->subkey_name)
+#define next_path (scratch->next_path)
+
     enumerate_values(hKey, base_path, counters);
 
     if (depth <= 0) {
         ADVAPI32$RegCloseKey(hKey);
+        KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
         return;
     }
 
@@ -1356,16 +1523,17 @@ static void enumerate_registry_tree(HKEY root, const wchar_t *base_path, int dep
             }
         }
         
-        {
-            wchar_t next_path[MAX_KEY_PATH];
-            if (build_subkey_path(base_path, subkey_name, next_path, MAX_KEY_PATH)) {
-                enumerate_registry_tree(root, next_path, depth - 1, counters);
-            }
+        if (build_subkey_path(base_path, subkey_name, next_path, MAX_KEY_PATH)) {
+            enumerate_registry_tree(root, next_path, depth - 1, counters);
         }
         index++;
     }
 
     ADVAPI32$RegCloseKey(hKey);
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
+
+#undef subkey_name
+#undef next_path
 }
 
 
@@ -1395,74 +1563,80 @@ void go(char *args, unsigned long alen) {
     (void)args;
     (void)alen;
 
-    scan_counters counters;
-    inline_memset(&counters, 0, sizeof(counters));
+    scan_counters *counters = (scan_counters *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(scan_counters), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!counters) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for MDM scan counters\n");
+        return;
+    }
+    inline_memset(counters, 0, sizeof(*counters));
 
     
-    check_dsregcmd_equivalent(&counters);
-    check_mdm_config_policy(&counters);
-    check_intune_evidence(&counters);
-    enumerate_enterprisemgmt_tasks(&counters);
+    check_dsregcmd_equivalent(counters);
+    check_mdm_config_policy(counters);
+    check_intune_evidence(counters);
+    enumerate_enterprisemgmt_tasks(counters);
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\PolicyManager\\current\\device",
         2,
-        &counters
+        counters
     );
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
         1,
-        &counters
+        counters
     );
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Authentication",
         1,
-        &counters
+        counters
     );
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Enrollments",
         3,
-        &counters
+        counters
     );
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\PolicyManager\\providers",
         3,
-        &counters
+        counters
     );
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\EnterpriseResourceManager\\Tracked",
         3,
-        &counters
+        counters
     );
 
     enumerate_registry_tree(
         HKEY_LOCAL_MACHINE,
         L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\MDM",
         2,
-        &counters
+        counters
     );
 
     
-    emit_posture_verdict(&counters);
+    emit_posture_verdict(counters);
 
     BeaconPrintf(CALLBACK_OUTPUT,
         "\n[i] Summary: scanned %lu subkeys, found %lu matches, printed %lu values",
-        (unsigned long)counters.subkeys_scanned,
-        (unsigned long)counters.matches,
-        (unsigned long)counters.values_printed);
-    if (counters.access_denied > 0) {
-        BeaconPrintf(CALLBACK_OUTPUT, ", %lu access denied", (unsigned long)counters.access_denied);
+        (unsigned long)counters->subkeys_scanned,
+        (unsigned long)counters->matches,
+        (unsigned long)counters->values_printed);
+    if (counters->access_denied > 0) {
+        BeaconPrintf(CALLBACK_OUTPUT, ", %lu access denied", (unsigned long)counters->access_denied);
     }
     BeaconPrintf(CALLBACK_OUTPUT, "\n");
+    KERNEL32$VirtualFree(counters, 0, MEM_RELEASE);
 }

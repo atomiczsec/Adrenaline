@@ -21,6 +21,9 @@ DECLSPEC_IMPORT WINBASEAPI DWORD WINAPI KERNEL32$GetLastError();
 DECLSPEC_IMPORT WINBASEAPI DWORD WINAPI PSAPI$GetProcessImageFileNameW(HANDLE hProcess, LPWSTR lpImageFileName, DWORD nSize);
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI PSAPI$EnumProcesses(DWORD *lpidProcess, DWORD cb, DWORD *lpcbNeeded);
 DECLSPEC_IMPORT WINBASEAPI int WINAPI KERNEL32$lstrcmpiA(LPCSTR lpString1, LPCSTR lpString2);
+DECLSPEC_IMPORT WINBASEAPI HANDLE WINAPI KERNEL32$GetProcessHeap(void);
+DECLSPEC_IMPORT WINBASEAPI LPVOID WINAPI KERNEL32$HeapAlloc(HANDLE, DWORD, SIZE_T);
+DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$HeapFree(HANDLE, DWORD, LPVOID);
 
 DECLSPEC_IMPORT WINADVAPI BOOL WINAPI ADVAPI32$OpenProcessToken(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
 DECLSPEC_IMPORT WINADVAPI BOOL WINAPI ADVAPI32$GetTokenInformation(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass, LPVOID TokenInformation, DWORD TokenInformationLength, PDWORD ReturnLength);
@@ -309,7 +312,16 @@ cleanup:
 }
 
 void go(char *args, unsigned long alen) {
-    DWORD pids[MAX_PIDS], cbNeeded, cProcesses;
+    typedef struct {
+        DWORD pids[MAX_PIDS];
+        char filterName[64];
+        HighValueEntry hvEntries[MAX_HIGH_VALUE_ENTRIES];
+        WCHAR procNameW[MAX_PATH];
+        char procNameA[MAX_PATH];
+    } process_scan_scratch_t;
+    HANDLE processHeap = KERNEL32$GetProcessHeap();
+    process_scan_scratch_t *scratch = NULL;
+    DWORD cbNeeded, cProcesses;
     unsigned int i;
     DWORD deniedCount = 0;
     DWORD openedCount = 0;
@@ -321,14 +333,18 @@ void go(char *args, unsigned long alen) {
     char *arg2 = NULL;
     BOOL enableSeDebug = FALSE;
     DWORD filterPid = 0;
-    char filterName[64];
     BOOL hasFilter = FALSE;
-    
-    HighValueEntry hvEntries[MAX_HIGH_VALUE_ENTRIES];
+
     int hvCount = 0;
-    
-    inline_memset(filterName, 0, sizeof(filterName));
-    inline_memset(hvEntries, 0, sizeof(hvEntries));
+
+    scratch = (process_scan_scratch_t *)KERNEL32$HeapAlloc(
+        processHeap, HEAP_ZERO_MEMORY, sizeof(process_scan_scratch_t));
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] HeapAlloc failed for process scan scratch buffer\n");
+        return;
+    }
+
+    inline_memset(scratch, 0, sizeof(*scratch));
     
     if (alen > 0) {
         BeaconDataParse(&parser, args, (int)alen);
@@ -345,10 +361,10 @@ void go(char *args, unsigned long alen) {
                         BeaconPrintf(CALLBACK_OUTPUT, "[i] filtering for pid: %lu\n", filterPid);
                     } else {
                         int j = 0;
-                        while (arg2[j] && j < 63) { filterName[j] = arg2[j]; j++; }
-                        filterName[j] = '\0';
+                        while (arg2[j] && j < 63) { scratch->filterName[j] = arg2[j]; j++; }
+                        scratch->filterName[j] = '\0';
                         hasFilter = TRUE;
-                        BeaconPrintf(CALLBACK_OUTPUT, "[i] filtering for process: %s\n", filterName);
+                        BeaconPrintf(CALLBACK_OUTPUT, "[i] filtering for process: %s\n", scratch->filterName);
                     }
                 }
             } else {
@@ -358,10 +374,10 @@ void go(char *args, unsigned long alen) {
                     BeaconPrintf(CALLBACK_OUTPUT, "[i] filtering for pid: %lu\n", filterPid);
                 } else {
                     int j = 0;
-                    while (arg1[j] && j < 63) { filterName[j] = arg1[j]; j++; }
-                    filterName[j] = '\0';
+                    while (arg1[j] && j < 63) { scratch->filterName[j] = arg1[j]; j++; }
+                    scratch->filterName[j] = '\0';
                     hasFilter = TRUE;
-                    BeaconPrintf(CALLBACK_OUTPUT, "[i] filtering for process: %s\n", filterName);
+                    BeaconPrintf(CALLBACK_OUTPUT, "[i] filtering for process: %s\n", scratch->filterName);
                 }
                 arg2 = BeaconDataExtract(&parser, NULL);
                 if (arg2 && (KERNEL32$lstrcmpiA(arg2, "/debug") == 0 || KERNEL32$lstrcmpiA(arg2, "/enablesebug") == 0)) {
@@ -381,12 +397,11 @@ void go(char *args, unsigned long alen) {
         BeaconPrintf(CALLBACK_OUTPUT, "[i] skipping seDebugPrivilege (OPSEC default).\n");
     }
 
-    inline_memset(pids, 0, sizeof(pids));
+    inline_memset(scratch->pids, 0, sizeof(scratch->pids));
 
-    if (!PSAPI$EnumProcesses(pids, sizeof(pids), &cbNeeded)) {
+    if (!PSAPI$EnumProcesses(scratch->pids, sizeof(scratch->pids), &cbNeeded)) {
         BeaconPrintf(CALLBACK_ERROR, "[-] enumProcesses failed. error: %lu\n", KERNEL32$GetLastError());
-        inline_memset(pids, 0, sizeof(pids));
-        return;
+        goto cleanup;
     }
 
     cProcesses = cbNeeded / sizeof(DWORD);
@@ -401,18 +416,18 @@ void go(char *args, unsigned long alen) {
     }
 
     for (i = 0; i < cProcesses; i++) {
-        if (pids[i] == 0) continue;
-        
-        if (hasFilter && filterPid > 0 && pids[i] != filterPid) {
+        if (scratch->pids[i] == 0) continue;
+
+        if (hasFilter && filterPid > 0 && scratch->pids[i] != filterPid) {
             continue;
         }
 
         HANDLE hProcess = NULL;
         DWORD desiredAccess = PROCESS_QUERY_LIMITED_INFORMATION;
-        hProcess = KERNEL32$OpenProcess(desiredAccess, FALSE, pids[i]);
+        hProcess = KERNEL32$OpenProcess(desiredAccess, FALSE, scratch->pids[i]);
         if (hProcess == NULL) {
             desiredAccess = PROCESS_QUERY_INFORMATION;
-            hProcess = KERNEL32$OpenProcess(desiredAccess, FALSE, pids[i]);
+            hProcess = KERNEL32$OpenProcess(desiredAccess, FALSE, scratch->pids[i]);
         }
 
         if (hProcess == NULL) {
@@ -420,13 +435,12 @@ void go(char *args, unsigned long alen) {
             continue;
         }
 
-        WCHAR procNameW[MAX_PATH];
         WCHAR* last_slash = NULL;
-        inline_memset(procNameW, 0, sizeof(procNameW));
-        
-        DWORD nameLen = PSAPI$GetProcessImageFileNameW(hProcess, procNameW, MAX_PATH - 1);
+        inline_memset(scratch->procNameW, 0, sizeof(scratch->procNameW));
+
+        DWORD nameLen = PSAPI$GetProcessImageFileNameW(hProcess, scratch->procNameW, MAX_PATH - 1);
         if (nameLen > 0 && nameLen < MAX_PATH) {
-            WCHAR* p = &procNameW[0];
+            WCHAR* p = &scratch->procNameW[0];
             last_slash = p;
             while (*p != L'\0') {
                 if (*p == L'\\') {
@@ -435,10 +449,10 @@ void go(char *args, unsigned long alen) {
                 p++;
             }
             
-            if (hasFilter && filterName[0] != '\0') {
-                if (!MatchProcessNameW(last_slash, filterName)) {
+            if (hasFilter && scratch->filterName[0] != '\0') {
+                if (!MatchProcessNameW(last_slash, scratch->filterName)) {
                     KERNEL32$CloseHandle(hProcess);
-                    inline_memset(procNameW, 0, sizeof(procNameW));
+                    inline_memset(scratch->procNameW, 0, sizeof(scratch->procNameW));
                     continue;
                 }
             }            
@@ -448,62 +462,61 @@ void go(char *args, unsigned long alen) {
             if (ADVAPI32$OpenProcessToken(hProcess, TOKEN_QUERY, &hToken)) {
                 HighValueEntry *hvSlot = NULL;
                 if (hvCount < MAX_HIGH_VALUE_ENTRIES) {
-                    hvSlot = &hvEntries[hvCount];
+                    hvSlot = &scratch->hvEntries[hvCount];
                 }
                 
-                BOOL isHV = PrintTokenInfo(hToken, pids[i], last_slash, hvSlot, hvCount);
+                BOOL isHV = PrintTokenInfo(hToken, scratch->pids[i], last_slash, hvSlot, hvCount);
                 if (isHV && hvSlot) {
                     hvCount++;
                 }
                 
                 KERNEL32$CloseHandle(hToken);
             } else {
-                char procNameA[MAX_PATH];
                 if (last_slash && last_slash[0] != L'\0') {
-                    WcharToChar(last_slash, procNameA, MAX_PATH);
+                    WcharToChar(last_slash, scratch->procNameA, MAX_PATH);
                 } else {
-                    inline_memset(procNameA, 0, sizeof(procNameA));
-                    procNameA[0] = '<';
-                    procNameA[1] = 'u';
-                    procNameA[2] = 'n';
-                    procNameA[3] = 'k';
-                    procNameA[4] = 'n';
-                    procNameA[5] = 'o';
-                    procNameA[6] = 'w';
-                    procNameA[7] = 'n';
-                    procNameA[8] = '>';
-                    procNameA[9] = '\0';
+                    inline_memset(scratch->procNameA, 0, sizeof(scratch->procNameA));
+                    scratch->procNameA[0] = '<';
+                    scratch->procNameA[1] = 'u';
+                    scratch->procNameA[2] = 'n';
+                    scratch->procNameA[3] = 'k';
+                    scratch->procNameA[4] = 'n';
+                    scratch->procNameA[5] = 'o';
+                    scratch->procNameA[6] = 'w';
+                    scratch->procNameA[7] = 'n';
+                    scratch->procNameA[8] = '>';
+                    scratch->procNameA[9] = '\0';
                 }
-                BeaconPrintf(CALLBACK_ERROR, "[-] PID: %-5lu | Process: %-25s | Couldn't open token. Error: %lu\n", 
-                    pids[i], procNameA, KERNEL32$GetLastError());
-                inline_memset(procNameA, 0, sizeof(procNameA));
+                BeaconPrintf(CALLBACK_ERROR, "[-] PID: %-5lu | Process: %-25s | Couldn't open token. Error: %lu\n",
+                    scratch->pids[i], scratch->procNameA, KERNEL32$GetLastError());
+                inline_memset(scratch->procNameA, 0, sizeof(scratch->procNameA));
             }
         } else {
             openedCount++;
             DWORD error = KERNEL32$GetLastError();
-            BeaconPrintf(CALLBACK_ERROR, "[-] PID: %-5lu | Process: <could not retrieve> | Error: %lu\n", pids[i], error);
+            BeaconPrintf(CALLBACK_ERROR, "[-] PID: %-5lu | Process: <could not retrieve> | Error: %lu\n", scratch->pids[i], error);
         }
 
         KERNEL32$CloseHandle(hProcess);
-        inline_memset(procNameW, 0, sizeof(procNameW));
+        inline_memset(scratch->procNameW, 0, sizeof(scratch->procNameW));
     }
 
     if (cProcesses > HIGH_VALUE_THRESHOLD && hvCount > 0) {
         BeaconPrintf(CALLBACK_OUTPUT, "\n[i] high-value processes (top %d)\n", hvCount);
         for (i = 0; i < (unsigned int)hvCount && i < MAX_HIGH_VALUE_ENTRIES; i++) {
             const char *hvType = "";
-            if (hvEntries[i].isSystem && hvEntries[i].isDelegation) {
+            if (scratch->hvEntries[i].isSystem && scratch->hvEntries[i].isDelegation) {
                 hvType = "SYSTEM+Delegation";
-            } else if (hvEntries[i].isSystem) {
+            } else if (scratch->hvEntries[i].isSystem) {
                 hvType = "SYSTEM";
-            } else if (hvEntries[i].isDelegation) {
+            } else if (scratch->hvEntries[i].isDelegation) {
                 hvType = "Delegation";
-            } else if (hvEntries[i].isElevated && hvEntries[i].isDomainUser) {
+            } else if (scratch->hvEntries[i].isElevated && scratch->hvEntries[i].isDomainUser) {
                 hvType = "Elevated+Domain";
             }
             BeaconPrintf(CALLBACK_OUTPUT, "[*] pid: %-5lu | process: %s | domain: %s\\user: %s | type: %s\n",
-                hvEntries[i].pid, hvEntries[i].procName, 
-                hvEntries[i].domain, hvEntries[i].user, hvType);
+                scratch->hvEntries[i].pid, scratch->hvEntries[i].procName,
+                scratch->hvEntries[i].domain, scratch->hvEntries[i].user, hvType);
         }
         BeaconPrintf(CALLBACK_OUTPUT, "\n");
     }
@@ -513,7 +526,7 @@ void go(char *args, unsigned long alen) {
     }
     BeaconPrintf(CALLBACK_OUTPUT, "[i] opened: %lu, skipped: %lu, success: %lu\n", openedCount, deniedCount, successPercent);
     
-    inline_memset(pids, 0, sizeof(pids));
-    inline_memset(filterName, 0, sizeof(filterName));
-    inline_memset(hvEntries, 0, sizeof(hvEntries));
+cleanup:
+    inline_memset(scratch, 0, sizeof(*scratch));
+    KERNEL32$HeapFree(processHeap, 0, scratch);
 }

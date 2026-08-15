@@ -45,6 +45,9 @@ DECLSPEC_IMPORT WINBASEAPI DWORD WINAPI KERNEL32$GetFileSize(HANDLE, LPDWORD);
 DECLSPEC_IMPORT WINBASEAPI HANDLE WINAPI KERNEL32$FindFirstFileA(LPCSTR, LPWIN32_FIND_DATAA);
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$FindNextFileA(HANDLE, LPWIN32_FIND_DATAA);
 DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$FindClose(HANDLE);
+DECLSPEC_IMPORT WINBASEAPI HANDLE WINAPI KERNEL32$GetProcessHeap(void);
+DECLSPEC_IMPORT WINBASEAPI LPVOID WINAPI KERNEL32$HeapAlloc(HANDLE, DWORD, SIZE_T);
+DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$HeapFree(HANDLE, DWORD, LPVOID);
 DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegOpenKeyExA(HKEY, LPCSTR, DWORD, REGSAM, PHKEY);
 DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegEnumKeyExA(HKEY, DWORD, LPSTR, LPDWORD, LPDWORD, LPSTR, LPDWORD, PFILETIME);
 DECLSPEC_IMPORT WINADVAPI LONG WINAPI ADVAPI32$RegQueryValueExA(HKEY, LPCSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD);
@@ -846,12 +849,16 @@ static void PrintChromeProfileProxy(const char *profileName, const char *fileDat
 }
 
 static void CheckChromeProxy(void) {
-    char localAppData[BUF_SIZE_MEDIUM];
-    char userDataPath[BUF_SIZE_LARGE];
-    char searchPattern[BUF_SIZE_LARGE];
-    char prefPath[BUF_SIZE_LARGE];
-    char fileData[FILE_SCAN_SIZE];
-    WIN32_FIND_DATAA findData;
+    typedef struct {
+        char localAppData[BUF_SIZE_MEDIUM];
+        char userDataPath[BUF_SIZE_LARGE];
+        char searchPattern[BUF_SIZE_LARGE];
+        char prefPath[BUF_SIZE_LARGE];
+        char fileData[FILE_SCAN_SIZE];
+        WIN32_FIND_DATAA findData;
+    } chrome_scratch_t;
+    HANDLE processHeap;
+    chrome_scratch_t *scratch;
     HANDLE hFind;
 
     BeaconPrintf(CALLBACK_OUTPUT, "[i] Checking Chrome Proxy Configuration...\n");
@@ -861,23 +868,38 @@ static void CheckChromeProxy(void) {
     PrintChromePolicyScope(HKEY_LOCAL_MACHINE, "HKLM", "Software\\Policies\\Google\\Chrome\\Recommended", "Recommended");
     PrintChromePolicyScope(HKEY_CURRENT_USER, "HKCU", "Software\\Policies\\Google\\Chrome\\Recommended", "Recommended");
 
-    if (!query_environment_variable("LOCALAPPDATA", localAppData, sizeof(localAppData), NULL)) {
+    processHeap = KERNEL32$GetProcessHeap();
+    scratch = (chrome_scratch_t *)KERNEL32$HeapAlloc(
+        processHeap, HEAP_ZERO_MEMORY, sizeof(chrome_scratch_t));
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] HeapAlloc failed for Chrome scan scratch buffer\n");
         return;
+    }
+
+#define localAppData (scratch->localAppData)
+#define userDataPath (scratch->userDataPath)
+#define searchPattern (scratch->searchPattern)
+#define prefPath (scratch->prefPath)
+#define fileData (scratch->fileData)
+#define findData (scratch->findData)
+
+    if (!query_environment_variable("LOCALAPPDATA", localAppData, sizeof(localAppData), NULL)) {
+        goto cleanup;
     }
 
     safe_copy(userDataPath, sizeof(userDataPath), localAppData);
     if (!safe_append(userDataPath, sizeof(userDataPath), "\\Google\\Chrome\\User Data\\")) {
-        return;
+        goto cleanup;
     }
 
     safe_copy(searchPattern, sizeof(searchPattern), userDataPath);
     if (!safe_append(searchPattern, sizeof(searchPattern), "*")) {
-        return;
+        goto cleanup;
     }
 
     hFind = KERNEL32$FindFirstFileA(searchPattern, &findData);
     if (hFind == INVALID_HANDLE_VALUE) {
-        return;
+        goto cleanup;
     }
 
     do {
@@ -895,22 +917,48 @@ static void CheckChromeProxy(void) {
             continue;
         }
 
-        if (read_text_file_prefix(prefPath, fileData, sizeof(fileData))) {
+        if (read_text_file_prefix(prefPath, fileData, FILE_SCAN_SIZE)) {
             PrintChromeProfileProxy(findData.cFileName, fileData);
         }
     } while (KERNEL32$FindNextFileA(hFind, &findData));
 
     KERNEL32$FindClose(hFind);
+
+cleanup:
+    KERNEL32$HeapFree(processHeap, 0, scratch);
+
+#undef localAppData
+#undef userDataPath
+#undef searchPattern
+#undef prefPath
+#undef fileData
+#undef findData
 }
 
 static void PrintDotNetMachineConfig(const char *label, const char *path) {
-    char fileData[FILE_SCAN_SIZE];
-    char section[SECTION_SCAN_SIZE];
-    char value[BUF_SIZE_MEDIUM];
+    typedef struct {
+        char fileData[FILE_SCAN_SIZE];
+        char section[SECTION_SCAN_SIZE];
+        char value[BUF_SIZE_MEDIUM];
+    } dotnet_config_scratch_t;
+    HANDLE processHeap;
+    dotnet_config_scratch_t *scratch;
     const char *proxySection;
 
-    if (!read_text_file_prefix(path, fileData, sizeof(fileData))) {
+    processHeap = KERNEL32$GetProcessHeap();
+    scratch = (dotnet_config_scratch_t *)KERNEL32$HeapAlloc(
+        processHeap, HEAP_ZERO_MEMORY, sizeof(dotnet_config_scratch_t));
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] HeapAlloc failed for .NET config scratch buffer\n");
         return;
+    }
+
+#define fileData (scratch->fileData)
+#define section (scratch->section)
+#define value (scratch->value)
+
+    if (!read_text_file_prefix(path, fileData, FILE_SCAN_SIZE)) {
+        goto cleanup;
     }
 
     proxySection = find_substring_ci(fileData, "<defaultProxy");
@@ -918,7 +966,7 @@ static void PrintDotNetMachineConfig(const char *label, const char *path) {
         proxySection = find_substring_ci(fileData, "<proxy");
     }
     if (!proxySection) {
-        return;
+        goto cleanup;
     }
 
     copy_window(section, sizeof(section), proxySection, SECTION_SCAN_SIZE - 1);
@@ -952,16 +1000,36 @@ static void PrintDotNetMachineConfig(const char *label, const char *path) {
     if (find_substring_ci(section, "<bypasslist")) {
         BeaconPrintf(CALLBACK_OUTPUT, "    bypasslist present\n");
     }
+
+cleanup:
+    KERNEL32$HeapFree(processHeap, 0, scratch);
+
+#undef fileData
+#undef section
+#undef value
 }
 
 static void CheckDotNetProxy(void) {
-    char windir[BUF_SIZE_MEDIUM];
-    char path[BUF_SIZE_LARGE];
+    typedef struct {
+        char windir[BUF_SIZE_MEDIUM];
+        char path[BUF_SIZE_LARGE];
+    } dotnet_path_scratch_t;
+    HANDLE processHeap = KERNEL32$GetProcessHeap();
+    dotnet_path_scratch_t *scratch = (dotnet_path_scratch_t *)KERNEL32$HeapAlloc(
+        processHeap, HEAP_ZERO_MEMORY, sizeof(dotnet_path_scratch_t));
 
     BeaconPrintf(CALLBACK_OUTPUT, "[i] Checking .NET Framework Proxy Configuration...\n");
 
-    if (!query_environment_variable("WINDIR", windir, sizeof(windir), NULL)) {
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] HeapAlloc failed for .NET path scratch buffer\n");
         return;
+    }
+
+#define windir (scratch->windir)
+#define path (scratch->path)
+
+    if (!query_environment_variable("WINDIR", windir, sizeof(windir), NULL)) {
+        goto cleanup;
     }
 
     safe_copy(path, sizeof(path), windir);
@@ -979,6 +1047,12 @@ static void CheckDotNetProxy(void) {
     safe_copy(path, sizeof(path), windir);
     safe_append(path, sizeof(path), "\\Microsoft.NET\\Framework64\\v4.0.30319\\Config\\machine.config");
     PrintDotNetMachineConfig(".NET Framework64 v4.0.30319", path);
+
+cleanup:
+    KERNEL32$HeapFree(processHeap, 0, scratch);
+
+#undef windir
+#undef path
 }
 
 void go(char *args, unsigned long alen) {

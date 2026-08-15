@@ -73,6 +73,8 @@ DECLSPEC_IMPORT DWORD WINAPI KERNEL32$GetLastError(VOID);
 DECLSPEC_IMPORT WINBASEAPI HMODULE WINAPI KERNEL32$GetModuleHandleW(LPCWSTR);
 DECLSPEC_IMPORT WINBASEAPI HMODULE WINAPI KERNEL32$LoadLibraryW(LPCWSTR);
 DECLSPEC_IMPORT WINBASEAPI FARPROC WINAPI KERNEL32$GetProcAddress(HMODULE, LPCSTR);
+DECLSPEC_IMPORT WINBASEAPI LPVOID WINAPI KERNEL32$VirtualAlloc(LPVOID, SIZE_T, DWORD, DWORD);
+DECLSPEC_IMPORT WINBASEAPI BOOL WINAPI KERNEL32$VirtualFree(LPVOID, SIZE_T, DWORD);
 
 typedef EVT_HANDLE (WINAPI *pfnEvtQuery)(
     EVT_HANDLE Session,
@@ -135,7 +137,7 @@ static __attribute__((unused)) void *inline_memcpy(void *dest, const void *src, 
     return dest;
 }
 
-static int inline_strlen(const char *s) {
+static __attribute__((unused)) int inline_strlen(const char *s) {
     int len = 0;
     if (!s) {
         return 0;
@@ -295,6 +297,19 @@ static void enumerate_logon_events(EvtApis *apis) {
 #define EVT_BATCH_SIZE 4
 #define FIELD_BUF_LEN  64
 #define MAX_BUFFER_SIZE 16384
+#define XML_BUF_SIZE_BYTES 8192
+#define XML_BUF_SIZE_CHARS (XML_BUF_SIZE_BYTES / sizeof(wchar_t))
+
+    typedef struct {
+        wchar_t xmlBuffer[XML_BUF_SIZE_CHARS];
+        wchar_t extractedUser[128];
+        wchar_t extractedWs[128];
+        wchar_t extractedIp[128];
+        wchar_t extractedEventId[16];
+        char user_a[128];
+        char ws_a[128];
+        char ip_a[128];
+    } event_scratch_t;
 
     EVT_HANDLE hQuery = NULL;
     EVT_HANDLE hContext = NULL;
@@ -306,8 +321,16 @@ static void enumerate_logon_events(EvtApis *apis) {
     DWORD prop_count = 0;
     int i = 0;
     UINT32 eventId = 0;
+    event_scratch_t *scratch = NULL;
 
     if (!apis || !apis->EvtQuery) {
+        return;
+    }
+
+    scratch = (event_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(event_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for event rendering scratch buffer\n");
         return;
     }
 
@@ -335,7 +358,7 @@ static void enumerate_logon_events(EvtApis *apis) {
         if (hContext) {
             apis->EvtClose(hContext);
         }
-        return;
+        goto cleanup;
     }
 
     while (total_events < MAX_EVENTS) {
@@ -361,11 +384,7 @@ static void enumerate_logon_events(EvtApis *apis) {
         }
 
         for (i = 0; i < (int)returned && total_events < MAX_EVENTS; i++) {
-            #define XML_BUF_SIZE_BYTES 8192
-            #define XML_BUF_SIZE_CHARS (XML_BUF_SIZE_BYTES / sizeof(wchar_t))
-            wchar_t xmlBuffer[XML_BUF_SIZE_CHARS];
-
-            inline_memset(xmlBuffer, 0, sizeof(xmlBuffer));
+            inline_memset(scratch, 0, sizeof(*scratch));
             buffer_used = 0;
             prop_count = 0;
 
@@ -393,7 +412,7 @@ static void enumerate_logon_events(EvtApis *apis) {
                     events[i],
                     MY_EVT_RENDER_EVENT_XML,
                     XML_BUF_SIZE_BYTES,
-                    xmlBuffer,
+                    scratch->xmlBuffer,
                     &buffer_used,
                     &prop_count)) {
                 DWORD err = KERNEL32$GetLastError();
@@ -403,22 +422,17 @@ static void enumerate_logon_events(EvtApis *apis) {
 
             DWORD chars_used = buffer_used / sizeof(wchar_t);
             if (chars_used < XML_BUF_SIZE_CHARS) {
-                xmlBuffer[chars_used] = L'\0';
+                scratch->xmlBuffer[chars_used] = L'\0';
             } else {
-                xmlBuffer[XML_BUF_SIZE_CHARS - 1] = L'\0';
+                scratch->xmlBuffer[XML_BUF_SIZE_CHARS - 1] = L'\0';
             }
 
             const wchar_t *p;
-            const wchar_t *buf_end = xmlBuffer + XML_BUF_SIZE_CHARS;
-
-            wchar_t extractedUser[128] = {0};
-            wchar_t extractedWs[128] = {0};
-            wchar_t extractedIp[128] = {0};
-            wchar_t extractedEventId[16] = {0};
+            const wchar_t *buf_end = scratch->xmlBuffer + XML_BUF_SIZE_CHARS;
 
 #define EXTRACT(tagstart, dest) \
-            if ((p = wcsistr(xmlBuffer, tagstart)) != NULL) { \
-                if (p >= xmlBuffer && p < buf_end) { \
+            if ((p = wcsistr(scratch->xmlBuffer, tagstart)) != NULL) { \
+                if (p >= scratch->xmlBuffer && p < buf_end) { \
                     while (p < buf_end && *p && *p != L'>') p++; \
                     if (p < buf_end && *p == L'>') { \
                         p++; \
@@ -434,72 +448,72 @@ static void enumerate_logon_events(EvtApis *apis) {
                 } \
             }
 
-            if ((p = wcsistr(xmlBuffer, L"<EventID")) != NULL) {
-                if (p >= xmlBuffer && p < buf_end) {
+            if ((p = wcsistr(scratch->xmlBuffer, L"<EventID")) != NULL) {
+                if (p >= scratch->xmlBuffer && p < buf_end) {
                     while (p < buf_end && *p && *p != L'>') p++;
                     if (p < buf_end && *p == L'>') {
                         p++;
                         int k = 0;
-                        int dest_size = (int)(sizeof(extractedEventId)/sizeof(wchar_t));
+                        int dest_size = (int)(sizeof(scratch->extractedEventId)/sizeof(wchar_t));
                         while (p < buf_end && (*p == L' ' || *p == L'\t' || *p == L'\r' || *p == L'\n')) p++;
                         while (p + k < buf_end && p[k] >= L'0' && p[k] <= L'9' && k < dest_size-1) {
-                            extractedEventId[k] = p[k];
+                            scratch->extractedEventId[k] = p[k];
                             k++;
                         }
-                        extractedEventId[k] = L'\0';
+                        scratch->extractedEventId[k] = L'\0';
                     }
                 }
             }
-            EXTRACT(L"<Data Name=\"TargetUserName", extractedUser);
-            if (extractedUser[0] == L'\0') {
-                EXTRACT(L"<Data Name='TargetUserName", extractedUser);
+            EXTRACT(L"<Data Name=\"TargetUserName", scratch->extractedUser);
+            if (scratch->extractedUser[0] == L'\0') {
+                EXTRACT(L"<Data Name='TargetUserName", scratch->extractedUser);
             }
             
-            EXTRACT(L"<Data Name=\"WorkstationName", extractedWs);
-            if (extractedWs[0] == L'\0') {
-                EXTRACT(L"<Data Name='WorkstationName", extractedWs);
+            EXTRACT(L"<Data Name=\"WorkstationName", scratch->extractedWs);
+            if (scratch->extractedWs[0] == L'\0') {
+                EXTRACT(L"<Data Name='WorkstationName", scratch->extractedWs);
             }
             
-            EXTRACT(L"<Data Name=\"IpAddress", extractedIp);
-            if (extractedIp[0] == L'\0') {
-                EXTRACT(L"<Data Name='IpAddress", extractedIp);
+            EXTRACT(L"<Data Name=\"IpAddress", scratch->extractedIp);
+            if (scratch->extractedIp[0] == L'\0') {
+                EXTRACT(L"<Data Name='IpAddress", scratch->extractedIp);
             }
 
-            if (extractedUser[0] == L'\0') {
-                EXTRACT(L"<Data Name=\"SubjectUserName", extractedUser);
-                if (extractedUser[0] == L'\0') {
-                    EXTRACT(L"<Data Name='SubjectUserName", extractedUser);
+            if (scratch->extractedUser[0] == L'\0') {
+                EXTRACT(L"<Data Name=\"SubjectUserName", scratch->extractedUser);
+                if (scratch->extractedUser[0] == L'\0') {
+                    EXTRACT(L"<Data Name='SubjectUserName", scratch->extractedUser);
                 }
             }
 
             eventId = 0;
-            if (extractedEventId[0] != L'\0') {
+            if (scratch->extractedEventId[0] != L'\0') {
                 int k = 0;
-                while (extractedEventId[k] >= L'0' && extractedEventId[k] <= L'9') {
-                    eventId = eventId * 10 + (extractedEventId[k] - L'0');
+                while (scratch->extractedEventId[k] >= L'0' && scratch->extractedEventId[k] <= L'9') {
+                    eventId = eventId * 10 + (scratch->extractedEventId[k] - L'0');
                     k++;
                 }
             }
 
             int is_noise = 0;
 
-            if (wcsistr(extractedUser, L"NT AUTHORITY\\") ||
-                wcsistr(extractedUser, L"NT VIRTUAL MACHINE\\") ||
-                wcsistr(extractedUser, L"WINDOWS MANAGER\\") ||
-                wcsistr(extractedUser, L"DWM-") ||
-                wcsistr(extractedUser, L"UMFD-") ||
-                wcsistr(extractedUser, L"SYSTEM") ||
-                inline_wcsicmp(extractedUser, L"SYSTEM") == 0 ||
-                inline_wcsicmp(extractedUser, L"LOCAL SERVICE") == 0 ||
-                inline_wcsicmp(extractedUser, L"NETWORK SERVICE") == 0) {
+            if (wcsistr(scratch->extractedUser, L"NT AUTHORITY\\") ||
+                wcsistr(scratch->extractedUser, L"NT VIRTUAL MACHINE\\") ||
+                wcsistr(scratch->extractedUser, L"WINDOWS MANAGER\\") ||
+                wcsistr(scratch->extractedUser, L"DWM-") ||
+                wcsistr(scratch->extractedUser, L"UMFD-") ||
+                wcsistr(scratch->extractedUser, L"SYSTEM") ||
+                inline_wcsicmp(scratch->extractedUser, L"SYSTEM") == 0 ||
+                inline_wcsicmp(scratch->extractedUser, L"LOCAL SERVICE") == 0 ||
+                inline_wcsicmp(scratch->extractedUser, L"NETWORK SERVICE") == 0) {
                 is_noise = 1;
             }
 
-            if (wcsistr(extractedUser, L"$") && inline_wcslen(extractedUser) > 1) {
+            if (wcsistr(scratch->extractedUser, L"$") && inline_wcslen(scratch->extractedUser) > 1) {
                 is_noise = 1;
             }
 
-            if (extractedWs[0] == L'\0' && extractedIp[0] == L'\0') {
+            if (scratch->extractedWs[0] == L'\0' && scratch->extractedIp[0] == L'\0') {
                 is_noise = 1;
             }
 
@@ -508,32 +522,31 @@ static void enumerate_logon_events(EvtApis *apis) {
                 goto next_event;
             }
 
-            char user_a[128], ws_a[128], ip_a[128];
-            wide_to_ascii(extractedUser, user_a, sizeof(user_a));
-            wide_to_ascii(extractedWs,   ws_a,   sizeof(ws_a));
-            wide_to_ascii(extractedIp,   ip_a,   sizeof(ip_a));
+            wide_to_ascii(scratch->extractedUser, scratch->user_a, sizeof(scratch->user_a));
+            wide_to_ascii(scratch->extractedWs, scratch->ws_a, sizeof(scratch->ws_a));
+            wide_to_ascii(scratch->extractedIp, scratch->ip_a, sizeof(scratch->ip_a));
 
             const char *source = "(local)";
-            if (extractedWs[0] && inline_wcscmp(extractedWs, L"-") != 0)
-                source = ws_a;
-            else if (extractedIp[0] && inline_wcscmp(extractedIp, L"-") != 0)
-                source = ip_a;
+            if (scratch->extractedWs[0] && inline_wcscmp(scratch->extractedWs, L"-") != 0)
+                source = scratch->ws_a;
+            else if (scratch->extractedIp[0] && inline_wcscmp(scratch->extractedIp, L"-") != 0)
+                source = scratch->ip_a;
 
             int is_remote = 0;
-            if ((extractedWs[0] && inline_wcscmp(extractedWs, L"-") != 0) ||
-                (extractedIp[0] && inline_wcscmp(extractedIp, L"-") != 0)) {
+            if ((scratch->extractedWs[0] && inline_wcscmp(scratch->extractedWs, L"-") != 0) ||
+                (scratch->extractedIp[0] && inline_wcscmp(scratch->extractedIp, L"-") != 0)) {
                 is_remote = 1;
             }
 
             if (is_remote) {
                 BeaconPrintf(CALLBACK_OUTPUT, "[R] %s from %s (IP: %s)\n", 
-                    user_a[0] ? user_a : "(unknown)",
-                    extractedWs[0] && inline_wcscmp(extractedWs, L"-") != 0 ? ws_a : "(none)",
-                    extractedIp[0] && inline_wcscmp(extractedIp, L"-") != 0 ? ip_a : "(none)");
+                    scratch->user_a[0] ? scratch->user_a : "(unknown)",
+                    scratch->extractedWs[0] && inline_wcscmp(scratch->extractedWs, L"-") != 0 ? scratch->ws_a : "(none)",
+                    scratch->extractedIp[0] && inline_wcscmp(scratch->extractedIp, L"-") != 0 ? scratch->ip_a : "(none)");
             } else {
                 BeaconPrintf(CALLBACK_OUTPUT,
                     "[L] user: %-20s -> %s\n",
-                    user_a[0] ? user_a : "(unknown)",
+                    scratch->user_a[0] ? scratch->user_a : "(unknown)",
                     source);
             } 
 
@@ -550,12 +563,14 @@ next_event:
         }
     }
 
+cleanup:
     if (hQuery) {
         apis->EvtClose(hQuery);
     }
     if (hContext) {
         apis->EvtClose(hContext);
     }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
 
     BeaconPrintf(CALLBACK_OUTPUT,
                  "[i] Processed %lu events (max %d).\n",
@@ -581,4 +596,3 @@ void go(char *args, int length) {
 
     enumerate_logon_events(&apis);
 }
-

@@ -846,12 +846,15 @@ static void report_zed_manifest(const wchar_t *editor_label, const wchar_t *reso
 }
 
 static void scan_extension_root(const wchar_t *editor_label, const wchar_t *pattern, const wchar_t *manifest_name, int is_toml, scan_results_t *results) {
-    wchar_t root[MAX_PATH_LEN];
-    wchar_t search[MAX_PATH_LEN];
-    wchar_t child_dir[MAX_PATH_LEN];
-    wchar_t manifest_leaf[MAX_PATH_LEN];
-    wchar_t manifest_path[MAX_PATH_LEN];
-    WIN32_FIND_DATAW fd;
+    typedef struct {
+        wchar_t root[MAX_PATH_LEN];
+        wchar_t search[MAX_PATH_LEN];
+        wchar_t child_dir[MAX_PATH_LEN];
+        wchar_t manifest_leaf[MAX_PATH_LEN];
+        wchar_t manifest_path[MAX_PATH_LEN];
+        WIN32_FIND_DATAW fd;
+    } scan_scratch_t;
+    scan_scratch_t *scratch = NULL;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     DWORD needed;
 
@@ -859,21 +862,25 @@ static void scan_extension_root(const wchar_t *editor_label, const wchar_t *patt
         return;
     }
 
-    inline_memset(root, 0, sizeof(root));
-    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, root, MAX_PATH_LEN);
-    if (needed == 0 || needed > MAX_PATH_LEN || !is_directory(root)) {
+    scratch = (scan_scratch_t *)KERNEL32$VirtualAlloc(
+        NULL, sizeof(scan_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_ERROR, "[-] VirtualAlloc failed for extension scan scratch buffer\n");
         return;
     }
-
-    inline_memset(search, 0, sizeof(search));
-    if (!build_path(root, L"\\*", search, MAX_PATH_LEN)) {
-        return;
+    inline_memset(scratch, 0, sizeof(*scratch));
+    needed = KERNEL32$ExpandEnvironmentStringsW(pattern, scratch->root, MAX_PATH_LEN);
+    if (needed == 0 || needed > MAX_PATH_LEN || !is_directory(scratch->root)) {
+        goto cleanup;
     }
 
-    inline_memset(&fd, 0, sizeof(fd));
-    hFind = KERNEL32$FindFirstFileW(search, &fd);
+    if (!build_path(scratch->root, L"\\*", scratch->search, MAX_PATH_LEN)) {
+        goto cleanup;
+    }
+
+    hFind = KERNEL32$FindFirstFileW(scratch->search, &scratch->fd);
     if (hFind == INVALID_HANDLE_VALUE) {
-        return;
+        goto cleanup;
     }
 
     results->current_root_printed = 0;
@@ -881,38 +888,42 @@ static void scan_extension_root(const wchar_t *editor_label, const wchar_t *patt
         char *buffer = NULL;
         int was_truncated = 0;
 
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+        if ((scratch->fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
             continue;
         }
-        if (fd.cFileName[0] == L'.') {
+        if (scratch->fd.cFileName[0] == L'.') {
             continue;
         }
 
-        inline_memset(child_dir, 0, sizeof(child_dir));
-        inline_memset(manifest_leaf, 0, sizeof(manifest_leaf));
-        inline_memset(manifest_path, 0, sizeof(manifest_path));
-        if (!build_path(root, L"\\", child_dir, MAX_PATH_LEN) ||
-            !append_wide_in_place(child_dir, fd.cFileName, MAX_PATH_LEN) ||
-            !build_path(L"\\", manifest_name, manifest_leaf, MAX_PATH_LEN) ||
-            !build_path(child_dir, manifest_leaf, manifest_path, MAX_PATH_LEN)) {
+        inline_memset(scratch->child_dir, 0, sizeof(scratch->child_dir));
+        inline_memset(scratch->manifest_leaf, 0, sizeof(scratch->manifest_leaf));
+        inline_memset(scratch->manifest_path, 0, sizeof(scratch->manifest_path));
+        if (!build_path(scratch->root, L"\\", scratch->child_dir, MAX_PATH_LEN) ||
+            !append_wide_in_place(scratch->child_dir, scratch->fd.cFileName, MAX_PATH_LEN) ||
+            !build_path(L"\\", manifest_name, scratch->manifest_leaf, MAX_PATH_LEN) ||
+            !build_path(scratch->child_dir, scratch->manifest_leaf, scratch->manifest_path, MAX_PATH_LEN)) {
             continue;
         }
-        if (!path_exists(manifest_path)) {
+        if (!path_exists(scratch->manifest_path)) {
             continue;
         }
-        if (!read_file_text_bounded(manifest_path, MAX_FILE_READ, &buffer, &was_truncated)) {
+        if (!read_file_text_bounded(scratch->manifest_path, MAX_FILE_READ, &buffer, &was_truncated)) {
             continue;
         }
 
         if (is_toml) {
-            report_zed_manifest(editor_label, root, manifest_path, buffer, was_truncated, results);
+            report_zed_manifest(editor_label, scratch->root, scratch->manifest_path, buffer, was_truncated, results);
         } else {
-            report_manifest(editor_label, root, manifest_path, buffer, was_truncated, results);
+            report_manifest(editor_label, scratch->root, scratch->manifest_path, buffer, was_truncated, results);
         }
         KERNEL32$VirtualFree(buffer, 0, MEM_RELEASE);
-    } while (KERNEL32$FindNextFileW(hFind, &fd));
+    } while (KERNEL32$FindNextFileW(hFind, &scratch->fd));
 
-    KERNEL32$FindClose(hFind);
+cleanup:
+    if (hFind != INVALID_HANDLE_VALUE) {
+        KERNEL32$FindClose(hFind);
+    }
+    KERNEL32$VirtualFree(scratch, 0, MEM_RELEASE);
 }
 
 void go(char *args, unsigned long alen) {
