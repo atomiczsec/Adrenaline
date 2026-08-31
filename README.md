@@ -69,6 +69,7 @@
 | **BOF**                  | **Use**                                                                                                                                                         |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **[com_probe](execution/com_probe/)**           | Probe whether a COM object can be instantiated from a given CLSID. |
+| **[event_log_manage](execution/event_log_manage/)** | Inspects Event Log channels, manages BOF-owned classic logs and sources, writes text or binary events through registered sources, and clears channels with optional backup. |
 | **[firewall_rule](execution/firewall_rule/)**     | Add, remove, or query Windows Firewall rules via the COM API (`INetFwPolicy2`) without spawning `netsh.exe` or `cmd.exe`. Useful for pivoting inside networks. |
 | **[port_scan](execution/port_scan/)**     | Scans a single IPv4 host for open TCP and/or UDP ports via Winsock with bounded port lists, configurable timeouts, and concise open-port output. |
 | **[service_control](execution/service_control/)**     | Manages local Windows services via SCM: query (capped list or single service), create, start, stop, delete, and configure failure actions. Elevated rights usually required for changes. |
