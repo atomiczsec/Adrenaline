@@ -1,5 +1,5 @@
 {
   "name": "cicd_credential_hunt",
   "category": "credential_access",
-  "description": "Presence-first discovery of common CI/CD credential artifacts on Windows profiles with optional -verbose bounded content previews."
+  "description": "Presence-first discovery of common CI/CD, cloud, and developer credential artifacts on Windows profiles with optional -verbose bounded content previews."
 }
